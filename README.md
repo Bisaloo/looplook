@@ -57,9 +57,6 @@ installation:
 
 ``` r
 # Installation from GitHub 
-if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
-BiocManager::install(c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"))
-
 if (!requireNamespace("devtools", quietly = TRUE)) install.packages("devtools")
 devtools::install_github("zying106/looplook")
 ```
