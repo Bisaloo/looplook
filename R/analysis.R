@@ -518,7 +518,7 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
   slot(ego, "result") <- ego_df
 
   options(ggrepel.max.overlaps = 100)
-  p_cnet <- enrichplot::cnetplot(ego, foldChange = fc_vec, circular = FALSE, colorEdge = TRUE, showCategory = top_n, node_label = "category", repel = TRUE, cex_label_category = 1.3)
+  p_cnet <- enrichplot::cnetplot(ego, foldChange = fc_vec, showCategory = top_n, node_label = "category")
 
   if (length(genes_to_label) > 0 && requireNamespace("ggraph", quietly = TRUE)) {
     p_cnet <- p_cnet + ggraph::geom_node_text(ggplot2::aes(filter = name %in% genes_to_label, label = name), repel = TRUE, size = 3.5, fontface = "bold.italic", bg.color = "white", bg.r = 0.15, max.overlaps = Inf)

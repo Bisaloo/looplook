@@ -40,14 +40,10 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: false
 
-      - name: Install package dependencies
-        shell: Rscript {0}
-        run: |
-          install.packages("BiocManager")
-          install.packages(c("remotes", "rcmdcheck", "sessioninfo"))
-          options(repos = BiocManager::repositories())
-          remotes::install_deps(dependencies = TRUE, upgrade = "never")
-          sessioninfo::session_info()
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck, any::BiocManager
+          needs: check
 
       - uses: r-lib/actions/check-r-package@v2
         with:
