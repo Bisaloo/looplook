@@ -42,9 +42,9 @@ jobs:
 
       - name: Install dependencies (Bioconductor)
         run: |
-          install.packages(c("BiocManager", "remotes"))
-          BiocManager::install(dependencies = TRUE, ask = FALSE, update = FALSE)
-          remotes::install_cran("rcmdcheck")
+          Rscript -e 'install.packages(c("BiocManager", "remotes"))'
+          Rscript -e 'BiocManager::install(dependencies = TRUE, ask = FALSE, update = FALSE)'
+          Rscript -e 'remotes::install_cran("rcmdcheck")'
 
       - uses: r-lib/actions/check-r-package@v2
         with:
