@@ -28,6 +28,7 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
+      R_LIBS_USER: ${{ runner.temp }}/R-lib
 
     steps:
       - uses: actions/checkout@v4
@@ -40,13 +41,45 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: false
 
-      - name: Install dependencies (Bioconductor)
+      - name: Prepare shared R library
+        shell: Rscript {0}
         run: |
-          Rscript -e 'install.packages(c("BiocManager", "remotes"))'
-          Rscript -e 'BiocManager::install(dependencies = TRUE, ask = FALSE, update = FALSE)'
-          Rscript -e 'remotes::install_cran("rcmdcheck")'
+          dir.create(Sys.getenv("R_LIBS_USER"), recursive = TRUE, showWarnings = FALSE)
+          .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
+          cat("R_LIBS_USER=", Sys.getenv("R_LIBS_USER"), "\n", sep = "")
+          print(.libPaths())
 
-      - uses: r-lib/actions/check-r-package@v2
-        with:
-          upload-snapshots: true
-          build_args: 'c("--no-manual","--compact-vignettes=gs+qpdf")'
+      - name: Install package dependencies
+        shell: Rscript {0}
+        run: |
+          .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
+          install.packages("BiocManager")
+          options(repos = BiocManager::repositories())
+          install.packages(c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown", "BiocStyle"))
+          remotes::install_deps(dependencies = TRUE, upgrade = "never")
+          sessioninfo::session_info()
+
+      - name: Verify vignette builder packages
+        shell: Rscript {0}
+        run: |
+          .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
+          stopifnot(
+            requireNamespace("knitr", quietly = TRUE),
+            requireNamespace("rmarkdown", quietly = TRUE),
+            requireNamespace("BiocStyle", quietly = TRUE)
+          )
+          packageVersion("knitr")
+          packageVersion("rmarkdown")
+          packageVersion("BiocStyle")
+
+      - name: Run R CMD check
+        shell: Rscript {0}
+        run: |
+          .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
+          stopifnot(requireNamespace("rcmdcheck", quietly = TRUE))
+          rcmdcheck::rcmdcheck(
+            args = c("--no-manual", "--as-cran"),
+            build_args = c("--no-manual", "--compact-vignettes=gs+qpdf"),
+            error_on = "warning",
+            check_dir = "check"
+          )
