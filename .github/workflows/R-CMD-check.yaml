@@ -51,14 +51,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            pkg-config \
             libcurl4-openssl-dev \
             libssl-dev \
             libxml2-dev \
             libgit2-dev \
             libssh2-1-dev \
             libuv1-dev \
+            libcairo2-dev \
             libpng-dev \
             libjpeg-dev \
+            libtiff5-dev \
             libfreetype6-dev \
             libfontconfig1-dev \
             libharfbuzz-dev \
@@ -86,14 +89,23 @@ jobs:
             c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown"),
             dependencies = c("Depends", "Imports", "LinkingTo")
           )
-          BiocManager::install("BiocStyle", ask = FALSE, update = FALSE)
+          BiocManager::install(
+            c("BiocStyle", "karyoploteR", "ChIPseeker"),
+            ask = FALSE,
+            update = FALSE
+          )
           stopifnot(
             requireNamespace("rcmdcheck", quietly = TRUE),
             requireNamespace("knitr", quietly = TRUE),
             requireNamespace("rmarkdown", quietly = TRUE),
-            requireNamespace("BiocStyle", quietly = TRUE)
+            requireNamespace("BiocStyle", quietly = TRUE),
+            requireNamespace("karyoploteR", quietly = TRUE),
+            requireNamespace("ChIPseeker", quietly = TRUE)
           )
-          remotes::install_deps(dependencies = TRUE, upgrade = "never")
+          remotes::install_deps(
+            dependencies = c("Depends", "Imports", "LinkingTo"),
+            upgrade = "never"
+          )
           sessioninfo::session_info()
 
       - name: Run R CMD check
