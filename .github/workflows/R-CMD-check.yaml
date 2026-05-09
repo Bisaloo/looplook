@@ -38,21 +38,16 @@ jobs:
         with:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
-          use-public-rspm: true
+          use-public-rspm: false
 
-      - name: Configure Bioconductor repositories
+      - name: Install package dependencies
         shell: Rscript {0}
         run: |
           install.packages("BiocManager")
-          repos <- BiocManager::repositories()
-          repos_txt <- paste(capture.output(dput(repos)), collapse = "\n")
-          cat("options(repos = ", repos_txt,
-              ")\n", file = "~/.Rprofile", append = TRUE, sep = "")
-
-      - uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          extra-packages: any::rcmdcheck
-          needs: check
+          install.packages(c("remotes", "rcmdcheck", "sessioninfo"))
+          options(repos = BiocManager::repositories())
+          remotes::install_deps(dependencies = TRUE, upgrade = "never")
+          sessioninfo::session_info()
 
       - uses: r-lib/actions/check-r-package@v2
         with:
