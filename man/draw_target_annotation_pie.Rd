@@ -7,8 +7,8 @@
 draw_target_annotation_pie(
   bed_info,
   project_name,
-  filename,
-  color_palette = "Set3"
+  filename = NULL,
+  color_palette = "Set2"
 )
 }
 \arguments{
@@ -18,7 +18,7 @@ draw_target_annotation_pie(
 
 \item{filename}{Character string for the output filename.}
 
-\item{color_palette}{Character string for the color palette (default: "Set3").}
+\item{color_palette}{Character string for the color palette (default: "Set2").}
 }
 \value{
 A ggplot object representing the annotation pie chart.

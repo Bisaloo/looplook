@@ -6,8 +6,7 @@
 \usage{
 draw_upset_intersections(
   gene_lists,
-  project_name,
-  filename,
+  project_name = "UpSet Plot",
   group_colors = NULL
 )
 }
@@ -16,12 +15,10 @@ draw_upset_intersections(
 
 \item{project_name}{Character. Used for the file title.}
 
-\item{filename}{Character. Output file path (must end in .pdf or .png).}
-
-\item{group_colors}{Optional named character vector. Not used in this version.}
+\item{group_colors}{Optional mapped color schemes.}
 }
 \value{
-Invisibly returns \code{NULL}. Saves the plot to \code{filename}.
+Invisibly returns the \code{grob} object.
 }
 \description{
 Visualizes intersections among multiple gene sets using the classic UpSetR package.
@@ -29,18 +26,12 @@ Uses grid graphics capture to ensure plot generation in all environments.
 }
 \examples{
 gene_sets <- list(
-  Upregulated = c("A", "B", "C", "D"),
-  Downregulated = c("C", "D", "E", "F"),
-  Bound_by_TF = c("B", "D", "F", "G")
+  Upregulated = c("TP53", "BRCA1", "MYC", "EGFR"),
+  Downregulated = c("BRCA1", "MYC", "CDKN1A", "BAX"),
+  Bound_by_TF = c("MYC", "EGFR", "CDKN1A", "KRAS")
 )
-
-tf <- tempfile(fileext = ".pdf")
-
-if (requireNamespace("UpSetR", quietly = TRUE)) {
-  draw_upset_intersections(
-    gene_lists = gene_sets,
-    project_name = "Transcriptional Regulation",
-    filename = tf
-  )
-}
+draw_upset_intersections(
+  gene_lists = gene_sets,
+  project_name = "Transcriptional Regulation"
+)
 }

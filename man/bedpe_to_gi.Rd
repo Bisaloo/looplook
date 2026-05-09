@@ -35,13 +35,11 @@ it falls back to the 7th column. Non-numeric values are treated as 0.
 bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
 
 # 2. Run the function (ensure file was found)
-if (bedpe_path != "") {
-  gi <- bedpe_to_gi(bedpe_path)
+gi <- bedpe_to_gi(bedpe_path)
 
-  # 3. Inspect the result
-  print(gi)
+# 3. Inspect the result
+print(gi)
 
-  # Check the imported score column
-  S4Vectors::mcols(gi)$score
-}
+# Check the imported score column
+S4Vectors::mcols(gi)$score
 }

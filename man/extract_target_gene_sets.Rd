@@ -13,23 +13,10 @@ extract_target_gene_sets(
   target_mapping_mode = "all"
 )
 }
-\arguments{
-\item{annotation_res}{List output from \code{annotate_peaks_and_loops}.}
-
-\item{src}{Character. Source to extract from ("loops" or "targets").}
-
-\item{active_loop_types}{Character vector. Which loop types to extract (if src is "loops").}
-
-\item{include_Filled}{Logical. Whether to use \verb{_Filled} columns containing merged host/target genes.}
-
-\item{use_nearest_gene}{Logical. Whether to strictly use the 1D nearest gene (SYMBOL) instead of 3D loops.}
-
-\item{target_mapping_mode}{Character. Mapping mode for targets ("all" or "promoter").}
-}
 \value{
-Named list of gene character vectors.
+A named list of character vectors, each containing target gene symbols.
 }
 \description{
-Parses loop and target annotations using strict column matching to extract valid gene lists for downstream profiling.
+Parses loop and target annotations to extract valid gene lists.
 }
 \keyword{internal}

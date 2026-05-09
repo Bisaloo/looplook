@@ -13,41 +13,15 @@ run_heatmap_and_connectivity(
   heatmap_ntop,
   cor_method,
   current_proj_name,
-  out_dir,
   source_type,
   target_col = NULL,
   skip_heatmap = FALSE
 )
 }
-\arguments{
-\item{target_genes}{Character vector of gene symbols.}
-
-\item{tpm_mat_raw}{Data frame. Raw TPM/FPKM expression matrix.}
-
-\item{meta_raw}{Data frame. Sample metadata.}
-
-\item{loop_stats_df}{Data frame. Promoter or Distal statistics containing node degree and Hub labels.}
-
-\item{global_glist}{Named numeric vector. Global LFC values.}
-
-\item{heatmap_ntop}{Integer. Max highly variable genes for the heatmap.}
-
-\item{cor_method}{Character. Correlation method.}
-
-\item{current_proj_name}{Character. Project prefix.}
-
-\item{out_dir}{Character. Output directory.}
-
-\item{source_type}{Character. Source type ("loops" or "targets") for plot subtitling.}
-
-\item{target_col}{Character or NULL. Specific column in \code{loop_stats_df} to use as connectivity degree (e.g., "n_Linked_Distal").}
-
-\item{skip_heatmap}{Logical. If \code{TRUE}, skips drawing the heatmap and only draws connectivity plots.}
-}
 \value{
-Invisible \code{NULL}. Saves multiple PDF plots.
+A named list of plot objects (Heatmap, Raincloud, Scatter).
 }
 \description{
-Plots Z-score normalized expression heatmaps for target genes. Also generates scatter and Raincloud plots correlating 3D connectivity (Degree) with expression levels and LFC, inheriting Hub classifications from upstream.
+Generate Expression Heatmap and Connectivity Raincloud Plots
 }
 \keyword{internal}

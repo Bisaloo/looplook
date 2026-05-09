@@ -19,14 +19,14 @@ read_robust_general(
 
 \item{row_name}{Integer or NULL. Column index to be used as row names.}
 
-\item{desc}{Character. Short description for error logging (e.g., "BEDPE").}
+\item{desc}{Character. Short description for error logging.}
 
-\item{min_cols}{Integer. Minimum number of columns required to pass validation.}
+\item{min_cols}{Integer. Minimum number of columns required.}
 }
 \value{
 A data frame.
 }
 \description{
-Safely reads standard genomic formats (BED, BEDPE, CSV, TSV) using \code{data.table::fread} (if available) with progressive fallbacks to base R. Automatically handles delimiters and validates minimum column counts.
+Safely reads standard genomic formats utilizing \code{data.table::fread} for intelligent format inference.
 }
 \keyword{internal}

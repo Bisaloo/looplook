@@ -4,7 +4,7 @@
 \alias{draw_circular_bar_plot}
 \title{Internal: Draw Circular Bar Plot (Gene Counts)}
 \usage{
-draw_circular_bar_plot(data_df, project_name, filename, color_vec)
+draw_circular_bar_plot(data_df, project_name, filename = NULL, color_vec)
 }
 \arguments{
 \item{data_df}{Data frame containing loop and gene information.}

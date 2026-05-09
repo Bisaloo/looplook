@@ -8,25 +8,13 @@ run_lfc_violin(
   target_genes,
   global_glist,
   stat_test = "wilcox.test",
-  project_name,
-  out_dir
+  project_name
 )
 }
-\arguments{
-\item{target_genes}{Character vector of target gene symbols.}
-
-\item{global_glist}{Named numeric vector of global log fold changes (names = gene symbols).}
-
-\item{stat_test}{Character. Statistical test ("t.test" or "wilcox.test").}
-
-\item{project_name}{Character. Project-specific prefix for output.}
-
-\item{out_dir}{Character. Output directory.}
-}
 \value{
-Invisible \code{NULL}. Saves a narrow-format PDF plot.
+A \code{ggplot} object, or \code{NULL} if fewer than 3 valid targets.
 }
 \description{
-Visualizes the Log2 Fold Change distribution of target genes compared to the genomic background.
+Generate LFC Violin and Boxplot
 }
 \keyword{internal}

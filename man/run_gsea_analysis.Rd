@@ -4,29 +4,12 @@
 \alias{run_gsea_analysis}
 \title{Run Custom Gene Set Enrichment Analysis (GSEA)}
 \usage{
-run_gsea_analysis(
-  target_genes,
-  global_glist,
-  gsea_ntop,
-  current_proj_name,
-  out_dir
-)
-}
-\arguments{
-\item{target_genes}{Character vector. Target gene symbols forming the custom gene set.}
-
-\item{global_glist}{Named numeric vector. Globally ranked LFC values.}
-
-\item{gsea_ntop}{Integer. Maximum number of target genes to use (randomly downsampled if exceeded).}
-
-\item{current_proj_name}{Character. Prefix for plot and table.}
-
-\item{out_dir}{Character. Output directory.}
+run_gsea_analysis(target_genes, global_glist, gsea_ntop, current_proj_name)
 }
 \value{
-GSEA result object. Saves a composite GSEA plot (ES curve, barcode, LFC heatmap) to PDF.
+A list with \code{result} (data frame) and \code{plot} (ggplot) elements.
 }
 \description{
-Evaluates whether target genes are significantly enriched at the extremes (up/down-regulated) of the global ranked expression list.
+Run Custom Gene Set Enrichment Analysis (GSEA)
 }
 \keyword{internal}

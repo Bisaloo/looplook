@@ -4,19 +4,12 @@
 \alias{.plot_save_motif}
 \title{Plot and Save Motif Results (Barplot)}
 \usage{
-.plot_save_motif(res_df, out_dir, prefix)
-}
-\arguments{
-\item{res_df}{Data frame of motif enrichment results.}
-
-\item{out_dir}{Character. Output directory.}
-
-\item{prefix}{Character. File prefix.}
+.plot_save_motif(res_df, prefix)
 }
 \value{
-Invisible \code{NULL}.
+A \code{ggplot} barplot, or \code{NULL} if input is empty.
 }
 \description{
-Plots the top 15 enriched motifs ranked by -log10(P-value).
+Plot and Save Motif Results (Barplot)
 }
 \keyword{internal}

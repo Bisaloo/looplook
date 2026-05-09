@@ -2,11 +2,13 @@
 % Please edit documentation in R/annotation.R
 \name{annotate_peaks_and_loops}
 \alias{annotate_peaks_and_loops}
-\title{A core analytical engine enabling high-resolution spatial mapping of genomic features/peaks to 3D chromatin interaction targets}
+\title{Spatial mapping of 1D genomic features to 3D chromatin interaction targets}
 \usage{
 annotate_peaks_and_loops(
   bedpe_file,
   target_bed = NULL,
+  txdb = NULL,
+  org_db = NULL,
   species = "hg38",
   tss_region = c(-2000, 2000),
   out_dir = "./results",
@@ -20,102 +22,84 @@ annotate_peaks_and_loops(
 )
 }
 \arguments{
-\item{bedpe_file}{Character. Path to the BEDPE file containing 3D loop coordinates (The "3D Bridge").}
+\item{bedpe_file}{Character. Path to a BEDPE file (at least 6 columns: chr1, start1, end1, chr2, start2, end2).}
 
-\item{target_bed}{Optional character. Path to an auxiliary BED file (e.g., GWAS summary stats, eQTLs, ChIP-seq/ATAC-seq peaks). If provided, maps these 1D regulatory regions to 3D target genes.}
+\item{target_bed}{Optional path to a BED file of genomic features (e.g., ChIP-seq peaks, GWAS SNPs). When provided, these 1D regions are mapped to 3D target genes. Default: \code{NULL}.}
 
-\item{species}{Character. Reference genome build. Supported: \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}.}
+\item{txdb}{A \code{\link[GenomicFeatures]{TxDb}} object, a package name string, or \code{NULL} to auto-resolve from \code{species}. Default: \code{NULL}.}
 
-\item{tss_region}{Numeric vector. Defines the promoter window around the TSS. Default: \code{c(-2000, 2000)}.}
+\item{org_db}{An \code{OrgDb} object, a package name string, or \code{NULL} to auto-resolve from \code{species}. Default: \code{NULL}.}
 
-\item{out_dir}{Character. Directory for saving generated PDF plots and Excel results.}
+\item{species}{Character. Genome assembly used when \code{txdb} and \code{org_db} are \code{NULL}. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.}
 
-\item{expr_matrix_file}{Optional character. Path to the normalized RNA-seq matrix (e.g., TPM/FPKM). \strong{Highly recommended} as it fuels the intelligent conflict resolution and filters out silent elements.}
+\item{tss_region}{Numeric vector of length 2. Promoter window around the TSS in bp. Default: \code{c(-2000, 2000)}.}
 
-\item{sample_columns}{Character vector or Integer indices. Specifies which columns in \code{expr_matrix_file} to average for the baseline expression reference.}
+\item{out_dir}{Character. Output directory for the Excel results file. Default: \code{"./results"}.}
 
-\item{project_name}{Character. Prefix for all output files and plot titles.}
+\item{expr_matrix_file}{Optional path to a normalised expression matrix (TPM/FPKM, genes × samples). Enables expression-aware conflict resolution. Default: \code{NULL}.}
 
-\item{color_palette}{Character. Color brewer palette name for visualizations (e.g., \code{"Set2"}).}
+\item{sample_columns}{Character vector or integer indices. Columns in \code{expr_matrix_file} to average for baseline expression. Default: \code{NULL}.}
 
-\item{karyo_bin_size}{Numeric. Bin size for Karyotype genomic density heatmaps. Default: \code{1e5} (100kb).}
+\item{project_name}{Character. Prefix for output files and plot titles. Default: \code{"HiChIP"}.}
 
-\item{neighbor_hop}{Integer. \strong{Network Diffusion Depth}. \code{0} (Default) captures direct physical connections only; \code{1} captures indirect 1-hop hub-mediated connections.}
+\item{color_palette}{Character. RColorBrewer palette name. Default: \code{"Set2"}.}
 
-\item{hub_percentile}{Numeric (0-1). Top percentile threshold for defining high-connectivity "Regulatory Hubs" (default: \code{0.95}).}
+\item{karyo_bin_size}{Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.}
+
+\item{neighbor_hop}{Integer. k-hop ego-network expansion order via \code{igraph::ego()}. \code{0} restricts to direct contacts. Default: \code{0}.}
+
+\item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
 }
 \value{
-An invisible list of comprehensive data frames (also auto-saved as a multi-sheet \code{.xlsx}):
+An invisible named list:
 \itemize{
-\item \code{target_annotation}:
-Detailed annotation of \code{target_bed}. Features the important column: \code{Assigned_Target_Genes_Filled} (Loop-prioritized target, gracefully falling back to the local nearest gene if unlooped).
-\item \code{loop_annotation}:
-The fully annotated 3D network. Features \code{Putative_Target_Genes} capturing precisely resolved regulatory targets.
-\item \code{promoter_centric_stats}:
-Gene-level topological statistics. Contains structural node degrees and identifies \code{Is_High_Connectivity_Gene}.
-\item \code{distal_element_stats}:
-Enhancer-level topological statistics, highlighting critical regulatory anchors orchestrating multiple promoters.
-\item \code{anchor_annotation}:
-Locus-level summarization of all 1D anchor footprints.
+\item \code{target_annotation} — Peak-to-gene assignments with \code{Assigned_Target_Genes_Filled} (3D-prioritised, falling back to nearest gene).
+\item \code{loop_annotation} — Annotated 3D interactome with \code{Putative_Target_Genes}.
+\item \code{anchor_annotation} — Anchor-level genomic classifications.
+\item \code{promoter_centric_stats} — Gene-level connectivity statistics.
+\item \code{distal_element_stats} — Distal-element connectivity statistics.
+\item \code{plot_list} — Named list of ggplot objects (donut, karyotype, rose, flower).
 }
+Also writes a multi-sheet Excel workbook to \code{out_dir}.
 }
 \description{
-A highly sophisticated, dual-purpose 3D genomic engine designed to:
+A dual-purpose analytical framework designed to integrate 1D genomic features with 3D chromatin architecture.
 \enumerate{
-\item \strong{Annotate Chromatin Loops:} Accurately classify 3D spatial interactions (e.g., Enhancer-Promoter, Promoter-Promoter) using a strict structural hierarchy.
-\item \strong{Map External Features (genomic features to 3D):} Act as a \strong{"3D Spatial Bridge"} to link auxiliary 1D genomic features (e.g., GWAS risk SNPs, ATAC-seq peaks, ChIP-seq binding sites) to their genuine regulated target genes, fundamentally outperforming simple "nearest gene" heuristics.
+\item \strong{Loop Annotation:} Classifies 3D spatial interactions (e.g., Enhancer-Promoter, Promoter-Promoter) using a defined structural hierarchy.
+\item \strong{Feature-to-Target Mapping:} Links 1D genomic features (e.g., GWAS risk SNPs, ATAC-seq peaks, ChIP-seq binding sites) to putative target genes via 3D chromatin contacts, providing a spatial complement to linear proximity-based assignments.
+}
+}
+\details{
+\strong{Mapping Strategy and Fallback Mechanism}
+The method prioritizes physical 3D chromatin contacts. If a genomic feature overlaps an anchor looping to a distal gene, the distal gene is assigned as the target. In the absence of spatial loop evidence, the function implements a linear proximity-based fallback to assign the nearest active local gene, ensuring continuous annotation coverage.
+
+\strong{Hierarchical Conflict Resolution}
+To address complex loci where a single anchor overlaps multiple promoters (e.g., dense gene clusters or bidirectional promoters), the function executes a 3-step resolution:
+\enumerate{
+\item \emph{Expression Filter:} Excludes transcriptionally silent genes using a user-provided expression matrix.
+\item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > Antisense > lncRNA > Pseudogene}.
+\item \emph{Expression Tiebreaker:} Resolves remaining ambiguities by designating the gene with the highest transcriptional abundance as the primary target.
 }
 
-\strong{Core Philosophy: Bridging the genomic features-3D Gap}
-Traditional annotations typically assign non-coding variants to the nearest linear gene. This engine prioritizes \strong{physical 3D chromatin contacts}.
-If a GWAS SNP or enhancer lands in an anchor looping to a distal gene, the distal gene is accurately assigned. If no spatial loop exists, the engine intelligently falls back to the nearest active local gene (Smart Fallback), ensuring comprehensive and gapless annotation coverage.
-
-\strong{Key Algorithmic Innovations:}
+\strong{Network Topology Analysis}
 \itemize{
-\item \strong{Biotype & Expression-Aware Conflict Resolution:}
-When an anchor overlaps multiple promoters (e.g., dense gene loci or bidirectional promoters), it executes a rigorous 3-step resolution:
-\enumerate{
-\item \emph{Expression Pre-filter:} Eliminates transcriptionally silent genes based on the user-provided expression matrix.
-\item \emph{Functional Biotype Prioritization::} Prioritizes the remaining candidates by functional class in the following order: \code{Protein Coding > Antisense > lncRNA > Pseudogene}.
-\item \emph{Dominant Expression Tiebreaker:} Designates the gene with the highest transcriptional abundance as the target gene to further resolve any remaining mapping ambiguities.
-}
-\item \strong{Dynamic Topology Control (\code{neighbor_hop}):}
-Controls network diffusion depth. Allows signal propagation from a SNP -> Enhancer -> Hub -> Target Gene, which is ideal for uncovering multi-way super-enhancer cliques.
-\item \strong{Hub Detection:}
-Calculates precise node degrees to identify high-connectivity Promoter and Distal hubs based on the \code{hub_percentile}.
+\item \strong{Ego-Network Expansion (\code{neighbor_hop}):} Implements k-hop neighborhood expansion via \code{igraph::ego()}. A value of \code{0} restricts to direct contacts, while \code{1} includes secondary contacts to capture broader regulatory cliques.
+\item \strong{Hub Detection:} Utilizes a node-degree quantile threshold (\code{hub_percentile}) to identify highly connected regulatory elements.
 }
 }
 \examples{
-# 1. Get paths to example files included in the package
-bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
+# Mini example files (smaller subset for fast package checks)
+bedpe_path <- system.file("extdata", "example_loops_mini.bedpe", package = "looplook")
+bed_path <- system.file("extdata", "example_peaks_mini.bed", package = "looplook")
 
-# 2. Check if files and required annotation databases exist
-if (bedpe_path != "" && bed_path != "" && expr_path != "" &&
-  requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
-  requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  # =========================================================================
-  #  Integrative Analysis (Loops + GWAS/ChIP-seq + Expression)
-  # =========================================================================
-  # Here, `target_bed` can represent GWAS risk SNPs, ATAC-seq peaks, or
-  # ChIP-seq peaks. The engine bridges these 1D regions to their 3D genes.
-  res_integrated <- annotate_peaks_and_loops(
-    bedpe_file = bedpe_path,
-    target_bed = bed_path,
-    expr_matrix_file = expr_path,
-    sample_columns = c("con1", "con2"),
-    species = "hg38",
-    tss_region = c(-2000, 2000),
-    out_dir = tempdir(),
-    color_palette = "Set2",
-    karyo_bin_size = 1e5,
-    neighbor_hop = 0,
-    hub_percentile = 0.95,
-    project_name = "Example_HiChIP_Integrative"
-  )
-
-  # View integrated annotations linking external peaks/SNPs to target genes
-  head(res_integrated$target_annotation)
-}
+res <- annotate_peaks_and_loops(
+  bedpe_file = bedpe_path,
+  target_bed = bed_path,
+  species = "hg38",
+  tss_region = c(-2000, 2000),
+  out_dir = tempdir(),
+  neighbor_hop = 0,
+  project_name = "Quick_Example"
+)
+head(res$target_annotation)
 }

@@ -9,11 +9,10 @@ docs
 .DS_Store
 looplook.Rproj
 *.Rproj
-..Rcheck/
-..Rcheck/
+*.Rcheck/
+*.tar.gz
+looplook_results/
+tests/testthat/Rplots.pdf
 .Rproj.user/
-.Rhistory
-*.Rproj
-.DS_Store
 Meta/
 pkgdown/

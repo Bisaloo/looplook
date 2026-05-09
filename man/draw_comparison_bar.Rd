@@ -4,7 +4,7 @@
 \alias{draw_comparison_bar}
 \title{Internal: Draw Comparison Bar Chart}
 \usage{
-draw_comparison_bar(original_df, filtered_df, filename, color_vec)
+draw_comparison_bar(original_df, filtered_df, filename = NULL, color_vec)
 }
 \arguments{
 \item{original_df}{Data frame containing the original loop data.}

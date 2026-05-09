@@ -4,7 +4,7 @@
 \alias{draw_target_loop_donut}
 \title{Internal: Draw Target-Associated Loop Distribution (Donut Chart)}
 \usage{
-draw_target_loop_donut(loop_data, project_name, filename, color_vec)
+draw_target_loop_donut(loop_data, project_name, filename = NULL, color_vec)
 }
 \arguments{
 \item{loop_data}{Data frame containing loop information.}

@@ -10,29 +10,13 @@ run_ppi_analysis(
   org_db,
   ppi_score,
   ppi_ntop,
-  current_proj_name,
-  out_dir
+  current_proj_name
 )
 }
-\arguments{
-\item{target_genes}{Character vector of gene symbols.}
-
-\item{global_glist}{Named numeric vector of LFC values.}
-
-\item{org_db}{Character. Organism database to automatically infer STRING species ID.}
-
-\item{ppi_score}{Numeric. Minimum combined score threshold for STRING edges (e.g., 400).}
-
-\item{ppi_ntop}{Integer. Maximum number of genes to include (prioritized by highest absolute LFC).}
-
-\item{current_proj_name}{Character. Project prefix.}
-
-\item{out_dir}{Character. Output directory.}
-}
 \value{
-Invisible \code{NULL}. Saves a \code{ggraph} network PDF.
+A \code{ggplot} object representing the PPI network, or \code{NULL} if no interactions found.
 }
 \description{
-Maps target genes to STRING database, extracts the high-confidence protein-protein interaction subnetwork, removes isolated nodes, and visualizes the network colored by LFC and sized by degree.
+Construct and Visualize STRING PPI Network
 }
 \keyword{internal}

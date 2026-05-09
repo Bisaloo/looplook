@@ -9,6 +9,9 @@ author:
     affiliation: Zhejiang University
     email: 22407026@zju.edu.cn
     comment: ORCID:0009-0002-9286-1344
+  - name: Ye CHEN
+    affiliation: Zhejiang University
+    email: chenyephd@zju.edu.cn
   - name: Liang XU
     affiliation: Zhejiang University
     email: xuliang.phd@zju.edu.cn
@@ -24,6 +27,21 @@ vignette: >
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
+
+<style>
+  table {
+    border-collapse: collapse !important;
+    border: 1px solid #ddd !important;
+  }
+  table th, table td {
+    border: 1px solid #ddd !important;
+    padding: 6px 10px !important;
+  }
+  table th {
+    background: #f8f9fa;
+    font-weight: 600;
+  }
+</style>
 
 ```{r setup, include = FALSE}
 knitr::opts_chunk$set(
@@ -60,6 +78,65 @@ Beyond its utility as an integrative tool for target gene annotation, **`looploo
 
 5. **Automated Multi-Omics Functional Interpretations**: Provides an end-to-end analytical engine for generating publication-grade visualizations and functional interpretations. This includes assessments of network connectivity and expression dynamics, transcription factor motif enrichment (**SeqLogos**), and pathway association networks (**Cnetplots**).
 
+## Comparison with Existing Tools
+
+`looplook` bridges the gap between conventional 1D linear annotation strategies and specialized 3D chromatin interaction tools, providing a unified environment for target assignment, expression-aware refinement, consensus consolidation, and functional inference. Table \@ref(tab:comparison-table) highlights the core capabilities of `looplook` relative to existing tools in the ecosystem.
+
+<div style="margin: 30px auto; display: table; clear: both;">
+
+```{r comparison-table, echo=FALSE, message=FALSE, warning=FALSE}
+if (!requireNamespace("kableExtra", quietly = TRUE)) {
+  knitr::kable(comp, format = "html", escape = FALSE)
+} else {
+  library(kableExtra)
+
+# 1. 定义符号
+yes  <- "<span style='color: #2E8B57;'>&#10004;</span>"
+no   <- "<span style='color: #B0BEC5;'>&#10008;</span>"
+part <- "<span style='color: #FF8F00;'>Partial</span>"
+
+# 2. 构建数据框 (已修正双引号和多余的逗号)
+comp <- data.frame(
+  "Feature" = c(
+    "Primary annotation scheme", "User-input 3D interactome", "User-input omics data",
+    "Graph-based topological consensus", "Expression-guided refinement", "Topological reclassification",
+    "Multi-hop network diffusion", "Smart linear fallback", "Functional inference",
+    "Multi-track visualization", "Local execution", "Ecosystem"
+  ),
+  ChIPseeker = c("1D", no, yes, no, no, no, no, no, no, no, yes, "R"),
+  GREAT      = c("1D", no, yes, no, no, no, no, no, yes, no, no, "Web"),
+  GenomicInteractions = c("3D", yes, no, no, no, no, no, no, no, no, yes, "R"),
+  FUMA       = c("3D", no, no, no, part, no, no, no, no, no, no, "Web"),
+  "ABC Model" = c("3D", yes, yes, no, no, no, no, no, no, no, yes, "Python"),
+  looplook   = c("1D & 3D", yes, yes, yes, yes, yes, yes, yes, yes, yes, yes, "R"),
+  check.names = FALSE, stringsAsFactors = FALSE
+)
+
+# 3. 强力渲染
+knitr::kable(
+  comp, 
+  format = "html", 
+  escape = FALSE, 
+  align = c("l", "c", "c", "c", "c", "c", "c"), 
+  caption = "Comparison of core features between looplook and existing genomic annotation tools."
+) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover"), 
+    full_width = FALSE,
+    position = "left",
+    font_size = 12
+  ) %>%
+  row_spec(0, bold = TRUE, color = "black", background = "#F8F9FA", extra_css = "border: 1px solid #DDDDDD;") %>%
+  column_spec(1:7, extra_css = "border: 1px solid #DDDDDD; padding: 8px;")
+}
+```
+
+<small style="color: #666; display: block; margin-top: -10px; margin-bottom: 20px;">
+<em>Notes:</em> “1D” = linear proximity-based mapping; “3D” = mapping via spatial chromatin topology; “<span style='color: #2E8B57;'>&#10004;</span>” = native support; “<span style='color: #B0BEC5;'>&#10008;</span>” = not supported; “<span style='color: #FF8F00;'>Partial</span>” = partial support (FUMA relies on precompiled data rather than user-provided input).
+</small>
+
+`looplook` is the only tool in this comparison that unifies both 1D and 3D annotation paradigms within a single R-based workflow, while additionally offering graph-theoretic consensus consolidation, topological reclassification of silent regulatory elements, and local execution for data privacy — capabilities not natively available in any of the alternatives listed above.
+
 ***
 
 # Installation
@@ -73,7 +150,10 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocMana
 # Install annotation databases required for human (hg38) analysis
 BiocManager::install(c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"))
 
-# Install looplook from GitHub
+# Install looplook from Bioconductor (once accepted)
+# BiocManager::install("looplook")
+
+# Or install the development version from GitHub
 devtools::install_github("zying106/looplook")
 ```
 
@@ -279,27 +359,66 @@ These metrics quantify interactome connectivity to identify candidate regulatory
 - **`n_Linked_Promoters`**: Facilitates identification of candidate master enhancers that contact multiple distinct genes.
 - **`Is_High_Connectivity_Distal_Element`**: Flags highly connected non-coding elements that may act as 3D hubs.
 
-### Deep Dive: Output Visualizations
+### Deep Dive: Output Visualizations {.tabset}
 
-The module automatically generates up to 10 publication-grade PDF plots, enabling multi-scale interrogation of the 3D interactome.
+All plots are returned as objects in `res_integrated$plots$`, enabling direct inspection and customisation with standard **ggplot2** layers without re-running the pipeline.
 
 #### 1. Global 3D Network Profiling
 *(Always Generated)*
 
-* **Loop Type Proportions** (`*_Basic_Donut.pdf` & `*_Basic_Circular.pdf`): The Donut chart visualizes the raw physical frequency of each topological interaction. The Circular plot quantifies unique target genes per loop type, intuitively illustrating how certain loop types might disproportionately regulate target genes.
-
-* **Karyotype Density Heatmaps** (`*_Basic_Karyo_Anchors.pdf` & `*_Basic_Karyo_LoopGenes.pdf`): Genome-wide ideograms illustrating the density of 3D anchors and their associated genes, highlighting architectural hotspots.
-
-* **Topological Overlap** (`*_Basic_Flower.pdf`): A simplified flower plot showing the intersection of target genes (Core vs. Unique) across different loop types.
-* **Anchor Genomic Distribution** (`*_Basic_Anchor_Genomic_Distribution.pdf`): Pie chart summarizing the genomic context of 3D anchors (e.g., Distal Intergenic, Intron, Promoter).
+| Plot key | Description |
+|---|---|
+| `Basic_Donut` | Loop-type frequency (donut chart) |
+| `Basic_Circular` | Unique target genes per loop type (circular bar) |
+| `Basic_Flower` | Shared vs. unique genes across loop types |
+| `Karyo_Anchors` | Genome-wide anchor density heatmap |
+| `Karyo_LoopGenes` | Genome-wide loop-associated gene density |
+| `Anchor_Genomic_Distribution` | Genomic context of anchors (pie) |
+| `Target_Genomic_Distribution` | Genomic context of input features (pie) |
 
 #### 2. Genomic Feature-to-3D Target Profiling
 *(Requires `target_bed`)*
 
-* **Target Connected Rose Chart** (`*_Target_Rose.pdf`): Coxcomb chart illustrating the dominant 3D topologies associated with user-defined genomic features.
+| Plot key | Description |
+|---|---|
+| `Target_Rose` | Loop types linked to input features (coxcomb) |
+| `Target_Loop_Genomic_Distribution` | Genomic context of loop-connected features (pie) |
+| `Karyo_TargetGenes` | Chromosomal density of assigned target genes |
 
-* **Target Genomic Distribution Pies** (`*_Target_Genomic_Distribution.pdf` & `*_Target_Loop_Genomic_Distribution.pdf`): Compares the genomic distribution of input genomic features (peaks) versus those successfully linked via 3D loops. This comparison is insightful for demonstrating the enrichment of spatial interactions.
-* **Target Genes Karyotype** (`*_Basic_Karyo_TargetGenes.pdf`): Chromosomal density map of final putative target genes, identifying functionally active multi-omics loci.
+#### Customising Plots
+
+All ggplot-based plots accept standard **ggplot2** layers for recolouring, theme adjustment, or annotation:
+
+```{r plot-customise, eval=exists("res_integrated") && !is.null(res_integrated$plots$Basic_Donut)}
+# Access a stored plot
+p <- res_integrated$plots$Basic_Donut
+
+# Extract data and original label mapping
+donut_data <- p$data
+labels_vec <- setNames(donut_data$legend_label, donut_data$loop_type)
+
+# Apply a custom colour palette
+p + ggplot2::scale_fill_manual(
+  values = RColorBrewer::brewer.pal(length(labels_vec), "Dark2"),
+  labels = labels_vec
+) + ggplot2::theme(legend.position = "bottom")
+```
+
+To save any plot to disk, use `ggplot2::ggsave()`:
+
+```{r plot-save, eval = FALSE}
+ggplot2::ggsave(
+  filename = "my_custom_donut.pdf",
+  plot = res_integrated$plots$Basic_Donut,
+  width = 8, height = 6
+)
+```
+
+For `looplook_karyo` objects (karyotype heatmaps), use `print()` to display:
+
+```{r plot-karyo, eval = FALSE}
+print(res_integrated$plots$Karyo_Anchors)  # renders via grid or opens in browser
+```
 
 ***
 
@@ -322,40 +441,36 @@ The `refine_loop_anchors_by_expression` function implements functional filtratio
 In this scenario, a strict expression threshold eliminates loops where putative target genes are transcriptionally silent, without modifying the original structural classifications.
 
 ```{r refinement_basic, message=FALSE, warning=FALSE}
-res_integrated <- system.file("extdata", "analysis_results.RData", package = "looplook")
+rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
+load(rdata_path)  # loads res_integrated into the environment
 
-if (res_integrated != "") {
-  load(res_integrated)
-  res_basic <- refine_loop_anchors_by_expression(
-    annotation_res = res_integrated,
-    expr_matrix_file = expr_path,
-    sample_columns = c("con1", "con2"),
-    threshold = 1.0,
-    unit_type = "TPM",
-    reclassify_by_expression = FALSE,
-    out_dir = out_dir,
-    project_name = "Example_Basic_Filter"
-  )
-}
+res_basic <- refine_loop_anchors_by_expression(
+  annotation_res = res_integrated,
+  expr_matrix_file = expr_path,
+  sample_columns = c("con1", "con2"),
+  threshold = 1.0,
+  unit_type = "TPM",
+  reclassify_by_expression = FALSE,
+  out_dir = out_dir,
+  project_name = "Example_Basic_Filter"
+)
 ```
 
 ## Example B: Expression-Aware Reclassification (Recommended)
 
 This advanced mode is strongly recommended, as it preserves the valuable 3D structural framework while refining functional annotations. A silent promoter anchor is reclassified as an enhancer (`eP`), acknowledging that while its reference gene is transcriptionally inactive, this region itself may function as an active regulatory element for a distant gene.
 
-```{r refinement_reclassified, message=FALSE, warning=FALSE, eval = FALSE}
-if (exists("res_integrated")) {
-  refined_res <- refine_loop_anchors_by_expression(
-    annotation_res = res_integrated,
-    expr_matrix_file = expr_path,
-    sample_columns = c("con1", "con2"),
-    threshold = 1.0,
-    unit_type = "TPM",
-    reclassify_by_expression = TRUE, # Activates biological reclassification (e.g., P -> eP)
-    out_dir = out_dir,
-    project_name = "Example_Reclassified_Filter"
-  )
-}
+```{r refinement_reclassified, message=FALSE, warning=FALSE}
+refined_res <- refine_loop_anchors_by_expression(
+  annotation_res = res_integrated,
+  expr_matrix_file = expr_path,
+  sample_columns = c("con1", "con2"),
+  threshold = 1.0,
+  unit_type = "TPM",
+  reclassify_by_expression = TRUE,
+  out_dir = out_dir,
+  project_name = "Example_Reclassified_Filter"
+)
 ```
 
 ### Deep Dive: Filtration Visualizations
@@ -427,24 +542,21 @@ Ideal for complete multi-omics integration (e.g., HiChIP + ATAC-seq). This mode 
 diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
 meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
 
-if (exists("refined_res")) {
-  res_A <- profile_target_genes(
-    annotation_res = res_integrated,
-    diff_file = diff_path,
-    lfc_col = "log2FoldChange",
-    expr_matrix_file = expr_path,
-    metadata_file = meta_path,
-    target_source = c("loops", "targets"), # Analyzes both sources
-    target_mapping_mode = "all",
-    include_Filled = TRUE,
-    use_nearest_gene = FALSE,
-    project_name = "Scenario_A_Integrative",
-    out_dir = out_dir,
-    run_motif = FALSE, # Set TRUE in real analysis to scan JASPAR motifs
-    run_go = FALSE, # Set TRUE in real analysis for pathway enrichment
-    run_ppi = FALSE
-  )
-}
+res_A <- profile_target_genes(
+  annotation_res = res_integrated,
+  diff_file = diff_path,
+  lfc_col = "log2FoldChange",
+  expr_matrix_file = expr_path,
+  metadata_file = meta_path,
+  target_source = c("loops", "targets"),
+  target_mapping_mode = "all",
+  include_Filled = TRUE,
+  use_nearest_gene = FALSE,
+  project_name = "Scenario_A_Integrative",
+  run_motif = FALSE,
+  run_go = FALSE,
+  run_ppi = FALSE
+)
 ```
 
 ## Example B: Peak-Driven Strict Promoter Profiling (High Stringency)
@@ -453,69 +565,89 @@ This mode applies a rigorous dual-filtering strategy to yield a high-confidence 
 
 First, `target_source = "targets"` restricts profiling to genes regulated specifically by user-defined genomic features (e.g., GWAS SNPs or TF binding sites), excluding background spatial loops. Second, `target_mapping_mode = "promoter"` enforces topological stringency: loops linking peaks to target genes must directly contact canonical or reference promoters (i.e., strict `E-P` or `P-P` loops), excluding more permissive connections such as enhancer-gene body (`E-G`) interactions.
 
-```{r profiling_scenario_B, message=FALSE, warning=FALSE, eval = FALSE}
-if (exists("refined_res")) {
-  res_B <- profile_target_genes(
-    annotation_res = res_integrated,
-    diff_file = diff_path,
-    lfc_col = "log2FoldChange",
-    expr_matrix_file = expr_path,
-    metadata_file = meta_path,
-    target_source = "targets", # 1. Focus exclusively on inputted genomic features
-    target_mapping_mode = "promoter", # 2. Require strict loop-to-promoter collision
-    include_Filled = TRUE,
-    use_nearest_gene = FALSE,
-    project_name = "Scenario_B_StrictPromoter",
-    out_dir = out_dir,
-    run_motif = FALSE, # Set TRUE in real analysis to scan JASPAR motifs
-    run_go = FALSE, # Set TRUE in real analysis for pathway enrichment
-    run_ppi = FALSE
-  )
-}
+```{r profiling_scenario_B, message=FALSE, warning=FALSE}
+res_B <- profile_target_genes(
+  annotation_res = res_integrated,
+  diff_file = diff_path,
+  lfc_col = "log2FoldChange",
+  expr_matrix_file = expr_path,
+  metadata_file = meta_path,
+  target_source = "targets", # 1. Focus exclusively on inputted genomic features
+  target_mapping_mode = "promoter", # 2. Require strict loop-to-promoter collision
+  include_Filled = TRUE,
+  use_nearest_gene = FALSE,
+  project_name = "Scenario_B_StrictPromoter",
+  run_motif = FALSE, # Set TRUE in real analysis to scan JASPAR motifs
+  run_go = FALSE, # Set TRUE in real analysis for pathway enrichment
+  run_ppi = FALSE
+)
 ```
 
 ## Example C: 1D Linear Annotation Baseline (The Control)
 
 By setting `use_nearest_gene = TRUE`, this mode intentionally bypasses the 3D spatial topology and assigns features exclusively to their nearest neighboring gene. It serves as a conventional “baseline control.” Comparing results against Example A or B enables rigorous demonstration of the novel functional insights gained from 3D chromatin looping analyses relative to conventional method.
 
-```{r profiling_scenario_C, message=FALSE, warning=FALSE, eval = FALSE}
-if (exists("refined_res")) {
-  res_C <- profile_target_genes(
-    annotation_res = res_integrated,
-    diff_file = diff_path,
-    lfc_col = "log2FoldChange",
-    expr_matrix_file = expr_path,
-    metadata_file = meta_path,
-    target_source = "targets", # Focus on inputted peaks
-    target_mapping_mode = "all",
-    include_Filled = FALSE,
-    use_nearest_gene = TRUE, # Nearest neighboring gene (The Control)
-    project_name = "Scenario_C_LinearControl",
-    out_dir = out_dir,
-    run_motif = FALSE, # Set TRUE in real analysis to scan JASPAR motifs
-    run_go = FALSE, # Set TRUE in real analysis for pathway enrichment
-    run_ppi = FALSE
-  )
-}
+```{r profiling_scenario_C, message=FALSE, warning=FALSE}
+res_C <- profile_target_genes(
+  annotation_res = res_integrated,
+  diff_file = diff_path,
+  lfc_col = "log2FoldChange",
+  expr_matrix_file = expr_path,
+  metadata_file = meta_path,
+  target_source = "targets", # Focus on inputted peaks
+  target_mapping_mode = "all",
+  include_Filled = FALSE,
+  use_nearest_gene = TRUE, # Nearest neighboring gene (The Control)
+  project_name = "Scenario_C_LinearControl",
+  run_motif = FALSE, # Set TRUE in real analysis to scan JASPAR motifs
+  run_go = FALSE, # Set TRUE in real analysis for pathway enrichment
+  run_ppi = FALSE
+)
 ```
 
 ### Deep Dive: Functional Visualizations
 
-This module executes an extensive downstream pipeline that generates a complete, publication-ready figure panel. Rather than simple descriptive summaries, these visualizations are designed to test research hypotheses related to multi-omics integration.
+Results are returned as a named list, one element per `target_source` (e.g., `"loops"`, `"targets"`). Each element contains `plots` (ggplot objects), `target_gene_sets` (character vectors), and `go_results` (data frames).
 
-#### 1. Expression & Topological Dynamics
+```{r profiling-access, eval = FALSE}
+# Accessing results from a profiling run
+names(res_profile)               # one element per target_source ("loops", "targets")
+names(res_profile$loops)         # "go_results" "target_gene_sets" "plots"
 
-- **Transcriptional Profiling** (`*_LFC_Violin.pdf` & `*_Expression_Heatmap.pdf`): Integrates quantitative transcriptome data (e.g., RNA-seq) and differential expression statistics to evaluate whether 3D-annotated target genes exhibit statistically significant expression shifts relative to the global genome background. This provides a quantitative measure of functional relevance and correlative evidence of regulatory modulation.
-- **Topological-Transcriptional Association** (`*_Connectivity_Scatter.pdf` & `*_Raincloud_*.pdf`): Cross-references 3D connectivity (e.g., number of linked enhancers) with transcript abundance and fold changes. This may help to test the "hub hypothesis" (whether increased spatial connectivity correlates with more dynamic transcriptional output).
+# --- Target genes ---
+res_profile$loops$target_gene_sets           # named list of character vectors
+names(res_profile$loops$target_gene_sets)    # gene set keys (e.g. "All", "Up", "Down")
 
-#### 2. Regulatory Motif Scanning
+# --- GO enrichment table ---
+go_df <- res_profile$loops$go_results        # data frame
+head(go_df[order(go_df$pvalue),              # sort by significance
+  c("Description", "ONTOLOGY", "pvalue", "Count", "geneID")])
 
-- **Spatially Asymmetric Motif Signatures** (`*_Motif_*_RankScatter.pdf` & `*_Logos.pdf`): Separately analyses transcription factor motifs enriched in the promoter-proximal anchors and distal (enhancer) anchors.
+# --- All plot keys ---
+names(res_profile$loops$plots)
+```
 
-#### 3. Pathway & Network Enrichment
+#### Available Plot Keys
 
-- **Spatial Gene Set Enrichment** (`*_GSEA.pdf`): Projects 3D-derived target gene sets onto the globally ranked differential expression landscape. Rather than relying on pre-defined pathways, it treats the specific spatial network as a biologically meaningful gene set, and examines whether the 3D interactome contributes to the observed transcriptomic phenotype.
-- **Core Effector Networks** (`*_GO_Network.pdf`, `*_GO_Lollipop_*.pdf` & `*_PPI_Network_*.pdf`): Derived from Gene Ontology and STRING analyses. Rather than simply listing enriched terms, the Divergent Concept Networks and PPI graphs link key pathways to high-magnitude differentially expressed hub genes, bridging spatial chromatin architecture, transcriptional regulation, and functional protein networks.
+| Key | Description |
+|---|---|
+| `LFC_Violin` | Differential expression violin + boxplot |
+| `Heatmap` | Expression heatmap with sample annotations |
+| `Scatter` | Connectivity vs. expression scatter |
+| `Raincloud_LFC` | Raincloud plot of log2 fold changes |
+| `Raincloud_Expr` | Raincloud plot of expression levels |
+| `GSEA` | Gene Set Enrichment Analysis plot |
+| `GO_Network` | GO enrichment cnetplot |
+| `GO_Lollipop` | Summary GO lollipop facet |
+| `PPI` | STRING protein-protein interaction network |
+| `Proximal_Motif_Bar` | Proximal anchor motif enrichment barplot |
+| `Proximal_Motif_Logos` | Proximal anchor motif sequence logos |
+| `Proximal_Motif_Rank` | Proximal anchor motif rank scatter |
+| `Distal_Motif_Bar` | Distal anchor motif enrichment barplot |
+| `Distal_Motif_Logos` | Distal anchor motif sequence logos |
+| `Distal_Motif_Rank` | Distal anchor motif rank scatter |
+
+All ggplot-based plots accept standard **ggplot2** `+` layers for recolouring or theme adjustment (see Module 2 for examples).
 
 ***
 
@@ -566,6 +698,85 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
   )
 }
 ```
+
+***
+
+# One-Click Parameterised Report
+
+For rapid sharing with collaborators, a publication-ready HTML report can be generated with a single function call. The template automatically detects which pipeline stages are configured and hides unavailable sections:
+
+```{r report-example, eval=FALSE}
+library(looplook)
+
+# ── Required ──────────────────────────────────────────────────
+#   bedpe_file         Chromatin loops in BEDPE format
+# ── Required for annotation ───────────────────────────────────
+#   target_bed         Genomic features (ATAC-seq peaks, etc.)
+# ── Required for refinement + profiling ───────────────────────
+#   expr_matrix_file   Normalised expression matrix (TPM/FPKM)
+#   diff_file          Differential expression table (CSV/TSV)
+#   metadata_file      Sample metadata with Group column
+# ── Optional (defaults shown) ─────────────────────────────────
+#   species = "hg38"   project_name = "looplook Analysis"
+#   threshold = 1.0    unit_type = "TPM"
+#   run_go = TRUE      run_ppi = FALSE     run_motif = FALSE
+#   ... (see ?looplook_report for full list)
+# ── Reproducibility ────────────────────────────────────────
+#   The profiling stage uses R's random number generator for GSEA gene-set
+#   down-sampling and motif background sampling. For fully reproducible
+#   reports, call set.seed() before looplook_report():
+#     set.seed(42)
+#     looplook_report(...)
+
+# Minimal: annotation only
+looplook_report(
+  bedpe_file   = system.file("extdata", "example_loops_1.bedpe", package = "looplook"),
+  target_bed   = system.file("extdata", "example_peaks.bed", package = "looplook"),
+  project_name = "Quick Annotation"
+)
+
+# Full pipeline: annotation + refinement + profiling
+looplook_report(
+  bedpe_file       = "my_loops.bedpe",
+  target_bed       = "my_peaks.bed",
+  expr_matrix_file = "my_tpm.txt",
+  diff_file        = "my_deg.csv",
+  metadata_file    = "my_coldata.txt",
+  project_name     = "Integrative HiChIP Analysis",
+  run_go           = TRUE
+)
+
+# Reuse precomputed results: skip annotation and jump to refinement + profiling.
+# precomputed_res accepts a file path (.RData) or an in-memory list object.
+# bedpe_file is optional when precomputed_res is set.
+
+# Option A — save and reload from .RData:
+res <- annotate_peaks_and_loops(
+  bedpe_file = "my_loops.bedpe",
+  target_bed = "my_peaks.bed",
+  project_name = "MyProject"
+)
+save(res, file = "annotation_results.RData")
+
+looplook_report(
+  precomputed_res  = "annotation_results.RData",
+  expr_matrix_file = "my_tpm.txt",
+  diff_file        = "my_deg.csv",
+  metadata_file    = "my_coldata.txt",
+  run_go           = TRUE
+)
+
+# Option B — pass the object directly:
+looplook_report(
+  precomputed_res  = res,
+  expr_matrix_file = "my_tpm.txt",
+  diff_file        = "my_deg.csv",
+  metadata_file    = "my_coldata.txt",
+  run_go           = TRUE
+)
+```
+
+The template is also accessible from the RStudio menu: **File → New File → R Markdown → From Template → looplook Report**.
 
 ***
 

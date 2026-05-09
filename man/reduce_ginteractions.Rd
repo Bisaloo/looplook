@@ -27,23 +27,14 @@ Each resulting cluster is represented by the \strong{union genomic range (min st
 \examples{
 # 1. Load example data (loops that are close to each other)
 bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
+# Convert BEDPE to GInteractions object
+gi_raw <- bedpe_to_gi(bedpe_path)
 
-if (bedpe_path != "") {
-  # Convert BEDPE to GInteractions object
-  gi_raw <- bedpe_to_gi(bedpe_path)
+# 2. Run clustering
+res <- reduce_ginteractions(gi_raw, gap = 1000)
 
-  # 2. Run clustering
-  # Merge loops if their anchors are within 1000bp
-  res <- reduce_ginteractions(gi_raw, gap = 1000)
-
-  # 3. Inspect results
-  # The 'gi' element contains the merged consensus loops
-  print(res$gi)
-
-  # The 'membership' vector tells which original loop belongs to which cluster
-  head(res$membership)
-
-  # Check cluster sizes (how many loops were merged into each cluster)
-  table(res$membership)
-}
+# 3. Inspect results
+print(res$gi)
+head(res$membership)
+table(res$membership)
 }

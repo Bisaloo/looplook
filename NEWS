@@ -1,3 +1,24 @@
+Changes in version 0.99.9 (2026-05-09)
+-----------------------------------------
+
+Reviewer Response (Bisaloo, Bioconductor)
+
+* Added package-level man page and runnable examples for all exported functions.
+* Replaced sapply() with vapply(); removed <<- operator; eliminated dead code.
+* Unified 0-based BED/BEDPE import and 1-based internal coordinate handling.
+* Fixed GO enrichment table rendering (list-of-dataframes merge).
+* Fixed expression matrix gene-name loss with single-sample-column input.
+* Fixed OrgDb object handling via getFromNamespace() instead of get().
+* Added whitelist-overlap cross-validation warning in expression refinement.
+* Added empty-input guards for ChIPseeker::annotatePeak() and prepare_track_data().
+* Replaced deprecated ggplot2 size aesthetic with linewidth.
+* Improved test coverage to 84.70% with 29 dedicated regression tests.
+* Updated default colour palettes to colourblind-friendly schemes (Set2, Paired, PuOr, viridis).
+* looplook_report() template: enhanced metric cards, Sankey via saveWidget+iframe, aligned tables.
+* Vignette: expanded comparison table, reproducibility note, BiocManager install placeholder.
+* DESCRIPTION: Title case, non-package-name Description start, removed recursive SystemRequirements, expanded Suggests.
+* Precomputed results now accepted as in-memory list or file path; bedpe_file optional.
+
 Changes in version 0.99.0 (2026-03-02)
 -----------------------------------------
 * Comprehensive refactoring for Bioconductor submission, including Expression-Aware modules and enhanced vignettes.

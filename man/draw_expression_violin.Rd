@@ -7,7 +7,7 @@
 draw_expression_violin(
   plot_data,
   project_name,
-  filename,
+  filename = NULL,
   unit_type,
   group_colors
 )

@@ -9,27 +9,13 @@ run_go_enrichment(
   org_db,
   universe_genes,
   cnet_nSample = 50,
-  project_name = "Analysis",
-  out_dir = "./"
+  project_name = "Analysis"
 )
 }
-\arguments{
-\item{genes}{Character vector of target gene symbols.}
-
-\item{org_db}{Character. Organism database (e.g., "org.Hs.eg.db").}
-
-\item{universe_genes}{Named numeric vector (LFC) used as background universe and color scale.}
-
-\item{cnet_nSample}{Integer. Number of top GO pathways to display in the network.}
-
-\item{project_name}{Character. Prefix for outputs.}
-
-\item{out_dir}{Character. Output directory.}
-}
 \value{
-Data frame of raw GO enrichment results. Saves a Cnetplot PDF.
+A list with \code{result} (data frame) and \code{plot} (ggplot) elements.
 }
 \description{
-Runs Biological Process GO enrichment via \code{clusterProfiler} and visualizes the top pathways and their core Hub genes in a highly readable, non-overlapping divergent concept network (Cnetplot).
+Perform GO Enrichment and Generate Network Plot
 }
 \keyword{internal}

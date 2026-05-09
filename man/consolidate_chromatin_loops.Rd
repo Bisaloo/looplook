@@ -2,7 +2,7 @@
 % Please edit documentation in R/data_processing.R
 \name{consolidate_chromatin_loops}
 \alias{consolidate_chromatin_loops}
-\title{Consolidate and Integrate Chromatin Loops from Multiple Sources}
+\title{Consolidate and Integrate Chromatin Loops from Replicates or Multiple Sources}
 \usage{
 consolidate_chromatin_loops(
   files = NULL,
@@ -85,49 +85,47 @@ f1 <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
 f2 <- system.file("extdata", "example_loops_2.bedpe", package = "looplook")
 
 # 2. Run consolidation (ensure files exist)
-if (f1 != "" && f2 != "") {
-  # Example A: Intersect Mode
-  # Only keeps loops present in f1 that are also supported by f2
-  res_intersect <- consolidate_chromatin_loops(
-    files = c(f1, f2),
-    mode = "intersect",
-    gap = 1000,
-    out_file = tempfile(fileext = ".bedpe")
-  )
+# Example A: Intersect Mode
+# Only keeps loops present in f1 that are also supported by f2
+res_intersect <- consolidate_chromatin_loops(
+  files = c(f1, f2),
+  mode = "intersect",
+  gap = 1000,
+  out_file = tempfile(fileext = ".bedpe")
+)
 
-  # Example B: Consensus Mode (formerly Reproducible)
-  # Finds consensus loops supported by both replicates (default for N=2)
-  res_consensus <- consolidate_chromatin_loops(
-    files = c(f1, f2),
-    mode = "consensus",
-    gap = 1000,
-    out_file = tempfile(fileext = ".bedpe")
-  )
+# Example B: Consensus Mode (formerly Reproducible)
+# Finds consensus loops supported by both replicates (default for N=2)
+res_consensus <- consolidate_chromatin_loops(
+  files = c(f1, f2),
+  mode = "consensus",
+  gap = 1000,
+  out_file = tempfile(fileext = ".bedpe")
+)
 
-  # Example C: Union Mode
-  # Merges all loops into a single map
-  res_union <- consolidate_chromatin_loops(
-    files = c(f1, f2),
-    mode = "union",
-    gap = 1000,
-    out_file = tempfile(fileext = ".bedpe")
-  )
+# Example C: Union Mode
+# Merges all loops into a single map
+res_union <- consolidate_chromatin_loops(
+  files = c(f1, f2),
+  mode = "union",
+  gap = 1000,
+  out_file = tempfile(fileext = ".bedpe")
+)
 
-  # Example D: Dual Filtering Strategy (Recommended for HiChIP)
-  # 1. Pre-filter: Discard singletons (score < 2) to remove noise.
-  # 2. Merge: Find loops present in both replicates.
-  # 3. Post-filter: Keep only strong consensus loops (score > 5).
-  res_clean <- consolidate_chromatin_loops(
-    files = c(f1, f2),
-    mode = "consensus",
-    min_raw_score = 2, # Pre-filter (remove noise)
-    min_score = 5, # Post-filter (keep strong loops)
-    gap = 1000,
-    out_file = tempfile(fileext = ".bedpe")
-  )
+# Example D: Dual Filtering Strategy (Recommended for HiChIP)
+# 1. Pre-filter: Discard singletons (score < 2) to remove noise.
+# 2. Merge: Find loops present in both replicates.
+# 3. Post-filter: Keep only strong consensus loops (score > 5).
+res_clean <- consolidate_chromatin_loops(
+  files = c(f1, f2),
+  mode = "consensus",
+  min_raw_score = 2, # Pre-filter (remove noise)
+  min_score = 5, # Post-filter (keep strong loops)
+  gap = 1000,
+  out_file = tempfile(fileext = ".bedpe")
+)
 
-  # Inspect results
-  length(res_intersect)
-  length(res_clean)
-}
+# Inspect results
+length(res_intersect)
+length(res_clean)
 }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/visualization.R
 \name{plot_peaks_interactions}
 \alias{plot_peaks_interactions}
-\title{Publication-ready visualization toolkit for rendering genomic track data and statistical summaries related to 3D chromatin interactions}
+\title{Integrative visualization of 3D chromatin loops and genomic features}
 \usage{
 plot_peaks_interactions(
   bedpe_file,
@@ -24,11 +24,14 @@ plot_peaks_interactions(
 )
 }
 \arguments{
-\item{bedpe_file}{Character. Path to a BEDPE file (at least 6 columns; 7th column used as score if present).}
+\item{bedpe_file}{Character. Path to a BEDPE file (at least 6 columns; 7th
+column used as score if present).}
 
-\item{target_bed}{Optional character. Path to a BED file (e.g., peaks) to overlay below the loop track.}
+\item{target_bed}{Optional character. Path to a BED file (e.g., peaks) to
+overlay below the loop track.}
 
-\item{chr}{Character. Chromosome name (e.g., "chr8"). If NULL, inferred from most frequent chromosome in BEDPE.}
+\item{chr}{Character. Chromosome name (e.g., "chr8"). If NULL, inferred from
+the most frequent chromosome in the BEDPE.}
 
 \item{from}{Numeric. Start coordinate of the region to plot.}
 
@@ -36,52 +39,51 @@ plot_peaks_interactions(
 
 \item{species}{Character. Genome assembly: "hg38", "hg19", "mm10", or "mm9".}
 
-\item{max_levels}{Integer. Maximum number of vertical levels for arc stacking (default: 10).}
+\item{max_levels}{Integer. Maximum number of vertical levels for arc stacking
+(default: 10).}
 
-\item{base_anchor_height}{Numeric. Height of anchor rectangles (default: 0.1).}
+\item{base_anchor_height}{Numeric. Height of anchor rectangles (default: 0.05).}
 
-\item{loop_color}{Character. Default color for arcs when no score is provided (e.g., "#5D6D7E").}
+\item{loop_color}{Character. Default color for arcs when no score is provided
+(default: "#5D6D7E").}
 
-\item{anchor_color}{Character. Color for loop anchor rectangles (default: "#3498DB").}
+\item{anchor_color}{Character. Color for loop anchor rectangles
+(default: "#3498DB").}
 
-\item{overlap_color}{Character. Color for overlap track (default: "#E74C3C").}
+\item{overlap_color}{Character. Color for overlap track (default: "#02ABB4").}
 
 \item{exon_color}{Character. Gene exon fill color (default: "#2C3E50").}
 
 \item{intron_color}{Character. Gene intron line color (default: "black").}
 
-\item{score_to_alpha}{Logical. Whether to map interaction scores to arc transparency.}
+\item{score_to_alpha}{Logical. Whether to map interaction scores to arc
+transparency.}
 
-\item{min_score}{Logical. If TRUE, use score to control arc line width instead of color (not yet implemented in current version; future extension).}
+\item{min_score}{Optional numeric. Floor value for score mapping.}
 
-\item{save_file}{Optional character. File path to save the plot (e.g., "region_plot.pdf").}
+\item{save_file}{Character. Optional path to save the plot via
+\code{ggplot2::ggsave()}. When set, the plot is written to this file and
+returned invisibly.}
 }
 \value{
-A \code{ggplot} object.
+A \code{ggplot} object (invisibly when \code{save_file} is non-NULL).
 }
 \description{
-Generates an integrative genomic track plot resembling IGV, displaying chromatin loops as arcs,
-loop anchors as rectangles, optional overlapping features (e.g., ChIP-seq peaks), and annotated genes.
-Loop arcs can be colored or sized by interaction score (7th column in BEDPE).
+Generates an integrative genomic track plot displaying chromatin loops as arcs,
+loop anchors as rectangles, optional overlapping features (e.g., ChIP-seq peaks),
+and annotated genes. Loop arcs can be colored or sized by interaction score
+(7th column in BEDPE).
 }
 \examples{
-# 1. Get paths to example files included in the package
 bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
 bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-
-# 2. Run plotting (requires TxDb package for gene annotation)
-if (bedpe_path != "" &&
-  requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
-  requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  # Example : Integrative plot with overlapping peaks and output to file
-  p2 <- plot_peaks_interactions(
-    bedpe_file = bedpe_path,
-    target_bed = bed_path,
-    chr = "chr1",
-    from = 11884299,
-    to = 12106581,
-    species = "hg38",
-    save_file = tempfile(fileext = ".pdf")
-  )
-}
+p <- plot_peaks_interactions(
+  bedpe_file = bedpe_path,
+  target_bed = bed_path,
+  chr = "chr1",
+  from = 11884299,
+  to   = 12106581,
+  species = "hg38"
+)
+print(p)
 }

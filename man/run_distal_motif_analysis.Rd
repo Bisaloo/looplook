@@ -10,29 +10,20 @@ run_distal_motif_analysis(
   genome_id,
   pval_thresh,
   current_proj_name,
-  out_dir,
-  top_n = 5
+  top_n = 5,
+  jaspar_db = JASPAR2020::JASPAR2020,
+  jaspar_collection = "CORE"
 )
 }
 \arguments{
-\item{target_genes}{Character vector of target gene symbols.}
+\item{jaspar_db}{A JASPAR database object (e.g., \code{JASPAR2020::JASPAR2020} or \code{JASPAR2024::JASPAR2024}). Default: \code{JASPAR2020::JASPAR2020}.}
 
-\item{loop_df}{Data frame. Loop annotation table containing coordinates (chr1/start1/end1) and gene assignments.}
-
-\item{genome_id}{Character. Genome assembly (e.g., "hg19", "mm10") for sequence extraction.}
-
-\item{pval_thresh}{Numeric. P-value cutoff for motifmatchr scanning.}
-
-\item{current_proj_name}{Character. Project prefix.}
-
-\item{out_dir}{Character. Output directory.}
-
-\item{top_n}{Integer. Number of top enriched motifs to output as SeqLogos.}
+\item{jaspar_collection}{Character. JASPAR collection to query (e.g., \code{"CORE"}, \code{"CNE"}). Default: \code{"CORE"}.}
 }
 \value{
-Invisible \code{NULL}. Triggers internal plotting functions.
+A named list containing motif enrichment results and plot objects.
 }
 \description{
-Extracts genomic coordinates for proximal (gene-centric) and distal (enhancer-centric) anchors of loops connecting to target genes. Scans sequences against JASPAR core motifs to identify enriched TFBS.
+Run Dual Motif Analysis for Loop Anchors
 }
 \keyword{internal}

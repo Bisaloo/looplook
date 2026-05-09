@@ -7,7 +7,6 @@
 draw_karyo_heatmap_internal(
   gr_data,
   title_prefix,
-  filename,
   bin_size,
   sat_level,
   ref_txdb,
@@ -21,8 +20,6 @@ draw_karyo_heatmap_internal(
 
 \item{title_prefix}{(character) Subtitle descriptor (e.g., sample name).}
 
-\item{filename}{(character) Output PDF path.}
-
 \item{bin_size}{(integer) Bin width in base pairs (e.g., 1e6 for 1 Mb).}
 
 \item{sat_level}{(numeric) Quantile (0–1) for color saturation (e.g., 0.95).}
@@ -32,9 +29,12 @@ draw_karyo_heatmap_internal(
 \item{plot_species}{(character) Genome build/species code (e.g., "hg38", "mm10").}
 
 \item{unit_label}{(character) Unit for load annotation (e.g., "loops").}
+
+\item{custom_colors}{(character vector) Optional custom color palette.}
 }
 \value{
-Invisibly returns \code{NULL}. Side effect: saves a PDF karyotype heatmap to \code{filename}.
+A \code{looplook_karyo} object wrapping a rendered PNG payload. Use
+\code{print()} to display.
 }
 \description{
 Creates a genome-wide heatmap of genomic feature density (e.g., loops) across chromosomes,

@@ -2,12 +2,12 @@
 % Please edit documentation in R/annotation.R
 \name{refine_loop_anchors_by_expression}
 \alias{refine_loop_anchors_by_expression}
-\title{A transcriptome-informed filtering framework to refine the regulatory element (anchor) classification and  the loop-target linkage using gene expression profiles}
+\title{Expression-Aware refinement of loop anchors and target linkages}
 \usage{
 refine_loop_anchors_by_expression(
   annotation_res,
-  expr_matrix_file,
-  sample_columns,
+  expr_matrix_file = NULL,
+  sample_columns = NULL,
   threshold = 1,
   unit_type = "TPM",
   species = "hg38",
@@ -22,57 +22,52 @@ refine_loop_anchors_by_expression(
 \arguments{
 \item{annotation_res}{List. The raw foundational output object returned by \code{\link{annotate_peaks_and_loops}}.}
 
-\item{expr_matrix_file}{Character. Path to the normalized expression matrix (rows = genes, columns = samples). Supports CSV or TSV.}
+\item{expr_matrix_file}{Path to a normalised expression matrix (TPM/FPKM, genes × samples). Required for refinement. Default: \code{NULL}.}
 
-\item{sample_columns}{Character vector or Integer indices. The specific sample columns in the matrix to average for calculating the baseline expression.}
+\item{sample_columns}{Character vector or integer indices. Columns in \code{expr_matrix_file} to average. Default: \code{NULL}.}
 
-\item{threshold}{Numeric. The minimum expression value (e.g., TPM > 1) required to consider a gene "biologically active" (default: \code{1}).}
+\item{threshold}{Numeric. Minimum expression (e.g. TPM > 1) for a gene to be considered active. Default: \code{1}.}
 
-\item{unit_type}{Character. Expression unit used for plot labeling (e.g., \code{"TPM"}; default: \code{"TPM"}).}
+\item{unit_type}{Character. Expression unit for plot labels (e.g., \code{"TPM"}). Default: \code{"TPM"}.}
 
-\item{species}{Character. Reference genome build. Supported: \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}.}
+\item{species}{Character. Genome assembly. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.}
 
-\item{out_dir}{Character. Directory path to save the generated PDF Karyotypes, Rose plots, and Excel results.}
+\item{out_dir}{Character. Output directory for the Excel results file. Default: \code{"./results/filtered"}.}
 
-\item{project_name}{Character. Prefix for all output files (automatically appends \code{"_Filtered"} if not present).}
+\item{project_name}{Character. Prefix for output files (automatically appends \code{"_Filtered"}). Default: \code{"HiChIP"}.}
 
-\item{color_palette}{Character. Color brewer palette name for global visualization (default: \code{"Set2"}).}
+\item{color_palette}{Character. RColorBrewer palette name. Default: \code{"Set2"}.}
 
-\item{karyo_bin_size}{Numeric. Bin size for Karyotype genomic density heatmaps (default: \code{1e5}).}
+\item{karyo_bin_size}{Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.}
 
-\item{reclassify_by_expression}{Logical. If \code{TRUE} (default), mathematically silent Promoters (\code{P}) and Gene Bodies (\code{G}) are downgraded to \code{eP} and \code{eG}, preserving the 3D loop but correcting its topological class.}
+\item{reclassify_by_expression}{Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.}
 
-\item{hub_percentile}{Numeric (0-1). Top percentile threshold used as a fallback for calculating Hub metrics if upstream inheritance is missing (default: \code{0.95}).}
+\item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
 }
 \value{
-An invisible list containing the refined multi-omics datasets (also exported as \code{_Refined_Results.xlsx}):
+An invisible named list:
 \itemize{
-\item \code{loop_annotation}: The fully filtered 3D network with updated \code{loop_type} (e.g., eP-P) and active \code{Putative_Target_Genes}.
-\item \code{anchor_annotation}: Cluster annotations updated with expressed localized targets.
-\item \code{promoter_centric_stats}: Inherited and updated topological statistics for regulatory targets.
-\item \code{distal_element_stats}: Enhancer-level statistics preserving high-connectivity enhancer status.
-\item \code{target_annotation}: External features strictly linked to verified active loop components.
+\item \code{loop_annotation} — Filtered 3D network with updated \code{loop_type} (e.g., eP-P).
+\item \code{anchor_annotation} — Cluster annotations with expressed targets.
+\item \code{promoter_centric_stats} — Gene-level connectivity statistics.
+\item \code{distal_element_stats} — Distal-element connectivity statistics.
+\item \code{target_annotation} — External features linked to active loop components.
+\item \code{plot_list} — Named list of ggplot objects (dumbbell, rose, karyotype).
 }
+Also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
 }
 \description{
-A critical filtration engine that integrates quantitative RNA-seq data (e.g., TPM/FPKM)
-with 3D structural data to transition from a "Physical Contact Network" to a
-"Functionally Active Regulatory Network".
-
-It systematically evaluates every loop anchor, purging transcriptional noise,
-splitting conjoined multi-gene loci, and biologically reclassifying silent promoters into enhancer-like regulatory elements.
+Integrates quantitative RNA-seq data (e.g., TPM/FPKM) with 3D structural data
+to filter and reclassify regulatory elements, deriving a functionally active
+regulatory network from physical chromatin contacts.
 }
 \details{
-\strong{Core Algorithmic Innovations:}
+\strong{Algorithmic Framework:}
 \itemize{
-\item \strong{Multi-Gene Parsing & Precision Filtration:}
-Flawlessly handles merged gene assignments (e.g., \code{"GeneA;GeneB"}) generated by upstream biotype-aware annotations. It splits, individually evaluates against the expression threshold, and securely recombines the surviving active targets.
-\item \strong{Biologically-Driven Downgrading (eP / eG):}
-A purely physical Promoter (\code{P}) loop anchor that exhibits no active transcription is biologically reclassified as an enhancer-like element (\code{eP}). Gene bodies without transcription become \code{eG}. This corrects the regulatory syntax (e.g., turning a silent \code{P-P} loop into a functionally accurate \code{eP-P} enhancer-promoter loop).
-\item \strong{Topological Hub Inheritance (Crucial):}
-Unlike naive filters that recalculate node degrees from scratch, this engine \strong{inherits} the foundational 3D Hub classifications (e.g., \code{Is_High_Connectivity_Gene}) from the raw physical data. A structural hub remains structurally important; this function simply annotates its functional activation state, preventing the network from collapsing due to tissue-specific silencing.
-\item \strong{Automated Target Purification:}
-Intelligently detects external mapping columns (e.g., \code{Assigned_Target_Genes_Filled}) and filters them based on expression, ensuring that auxiliary BED targets are strictly linked only to functionally verified active genes.
+\item \strong{Target Filtration:} Parses merged gene assignments (e.g., \code{"GeneA;GeneB"}), evaluates individual genes against a defined expression threshold, and retains only transcriptionally active targets.
+\item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as enhancer-like regulatory elements (\code{eP}, \code{eG}). This adjusts the regulatory syntax to reflect functional states (e.g., reannotating a silent \code{P-P} loop to an \code{eP-P} interaction).
+\item \strong{Structural Hub Preservation:} Inherits foundational 3D Hub classifications (e.g., \code{Is_High_Connectivity_Gene}) derived from the raw physical network. This decouples intrinsic structural network topology from tissue-specific transcriptional activation states.
+\item \strong{External Target Refinement:} Filters auxiliary target mapping columns (e.g., \code{Assigned_Target_Genes_Filled}) based on expression criteria, ensuring that mapped 1D genomic features are exclusively linked to active genes.
 }
 }
 \examples{
@@ -80,30 +75,27 @@ Intelligently detects external mapping columns (e.g., \code{Assigned_Target_Gene
 rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
 expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
 
-# 2. Check if files exist before running
-if (rdata_path != "" && expr_path != "") {
-  # Safely load the pre-computed annotation result from RData
-  temp_env <- new.env()
-  load(rdata_path, envir = temp_env)
-  # Extract the first object found in the RData file
-  raw_annotation <- temp_env[[ls(temp_env)[1]]]
+# Safely load the pre-computed annotation result from RData
+temp_env <- new.env()
+load(rdata_path, envir = temp_env)
+# Extract the first object found in the RData file
+raw_annotation <- temp_env[[ls(temp_env)[1]]]
 
-  # =========================================================================
-  # Example : Advanced filtering WITH Transcriptome-Guided Reclassification
-  # =========================================================================
-  res_reclassified <- refine_loop_anchors_by_expression(
-    annotation_res = raw_annotation,
-    expr_matrix_file = expr_path,
-    sample_columns = c("con1", "con2"),
-    threshold = 1.0,
-    unit_type = "TPM",
-    species = "hg38",
-    out_dir = tempdir(),
-    project_name = "Example_Reclassified",
-    reclassify_by_expression = TRUE
-  )
+# =========================================================================
+# Example : Advanced filtering WITH Transcriptome-Guided Reclassification
+# =========================================================================
+res_reclassified <- refine_loop_anchors_by_expression(
+  annotation_res = raw_annotation,
+  expr_matrix_file = expr_path,
+  sample_columns = c("con1", "con2"),
+  threshold = 1.0,
+  unit_type = "TPM",
+  species = "hg38",
+  out_dir = tempdir(),
+  project_name = "Example_Reclassified",
+  reclassify_by_expression = TRUE
+)
 
-  # View the biologically corrected loop types (e.g., transition from P-P to eP-P)
-  print(table(res_reclassified$loop_annotation$loop_type))
-}
+# View the biologically corrected loop types (e.g., transition from P-P to eP-P)
+print(table(res_reclassified$loop_annotation$loop_type))
 }

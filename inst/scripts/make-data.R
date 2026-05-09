@@ -9,9 +9,10 @@
 # for demonstrating package functionality, running vignettes, and executing
 # unit tests within an acceptable time frame.
 #
-# LICENSE:
-# All example datasets are distributed under the same license as the
-# `looplook` package and are free for open-source usage.
+# PROVENANCE / REUSE NOTE:
+# Example files distributed with `looplook` are small derived subsets or
+# reformatted outputs generated from public resources listed below. Users should
+# refer to the original data sources and their stated access / reuse terms.
 #
 # =========================================================================
 # 1. ENCODE Blacklist Regions
@@ -41,7 +42,7 @@
 # Subsetting process for example data (Bash Pseudo-code):
 # ```bash
 # # Randomly sample exact number of lines using `shuf` to minimize package size
-# shuf -n 3wc-l00 raw_peaks_full.bed > example_peaks.bed
+# shuf -n 300 raw_peaks_full.bed > example_peaks.bed
 # shuf -n 600  raw_k27ac_peaks_full.bed > example_k27ac_peaks.bed
 #
 # shuf -n 300 raw_loops_1_full.bedpe > example_loops_1.bedpe
@@ -49,6 +50,19 @@
 #
 # shuf -n 300  raw_H3K27ac_loops_full.bedpe > example_loops_H3K27ac.bedpe
 # shuf -n 300  raw_Pol2_loops_full.bedpe > example_loops_pol2.bedpe
+# ```
+#
+# =========================================================================
+# 2b. Mini Example Data (for fast R CMD check examples)
+# Files: example_loops_mini.bedpe, example_peaks_mini.bed
+# =========================================================================
+# These are tiny subsets (15 loops, 10 peaks) of the full example files above,
+# used exclusively for the man-page examples of `annotate_peaks_and_loops` to
+# ensure R CMD check completes within the 10-minute Bioconductor limit.
+#
+# ```bash
+# head -15 example_loops_1.bedpe > example_loops_mini.bedpe
+# head -10 example_peaks.bed    > example_peaks_mini.bed
 # ```
 #
 # =========================================================================
@@ -76,21 +90,21 @@
 #   # =========================================================================
 #   # Example A: Integrative Analysis (Loops + Target BED like ATAC-seq)
 #   # =========================================================================
-#   res_integrated <- annotate_peaks_and_loops(
-#     bedpe_file = bedpe_path,
-#     target_bed = bed_path,
-#     species = "hg38",
-#     tss_region = c(-2000, 2000),
-#     out_dir = tempdir(),
-#     color_palette = "Set2",
-#     karyo_bin_size = 1e5,
-#     neighbor_hop = 0,
-#     hub_percentile = 0.95,
-#     project_name = "Example_HiChIP_Integrative"
-#   )
+# res_integrated <- annotate_peaks_and_loops(
+#   bedpe_file = bedpe_path,
+#   target_bed = bed_path,
+#   species = "hg38",
+#   tss_region = c(-2000, 2000),
+#   out_dir = tempdir(),
+#   color_palette = "Set2",
+#   karyo_bin_size = 1e5,
+#   neighbor_hop = 0,
+#   hub_percentile = 0.95,
+#   project_name = "Example_HiChIP_Integrative"
+# )
 #
-#   # Save the output for downstream testing
-#   save(res_integrated, file = "inst/extdata/analysis_results.RData")
+# # Save the output for downstream testing
+# save(res_integrated, file = "inst/extdata/analysis_results.RData")
 # }
 # ```
 #
@@ -98,7 +112,7 @@
 # 4. Transcriptomic Data (RNA-seq)
 # Files: example_tpm.txt, example_deg.txt, example_coldata.txt
 # =========================================================================
-# Source: Derived from publicly available RNA-seq datasets (GEO: GSE111253).
+# Source: Derived from publicly available RNA-seq datasets (GEO: GSE111252).
 #
 # Raw data processing pipeline (Bash Pseudo-code):
 # ```bash

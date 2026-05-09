@@ -1,32 +1,34 @@
 Package: looplook
-Title: Integrative suite for target assignment and functional annotation of chromatin interactions
+Title: Integrative Suite for Target Assignment and Functional Annotation of Chromatin Interactions
 Version: 0.99.8
 Authors@R: c(
     person(given = "Ying", family = "ZHANG", 
            role = c("aut", "cre"), 
            email = "12207129@zju.edu.cn", 
            comment = c(ORCID = "0009-0005-9644-7062")),
-    person(given = "Xingze", family = "HUANG", 
-           role = c("ctb"), 
+    person(given = "Xingze", family = "HUANG",
+           role = c("ctb"),
            email = "22407026@zju.edu.cn",
            comment = c(ORCID = "0009-0002-9286-1344")),
-    person(given = "Liang", family = "XU", 
+    person(given = "Ye", family = "CHEN",
+           role = "ctb",
+           email = "chenyephd@zju.edu.cn"),
+    person(given = "Liang", family = "XU",
            role = c("ctb", "fnd"), 
            email = "xuliang.phd@zju.edu.cn",
            comment = "This work is funded by the Fundamental Research Funds for the Central Universities (226-2025-00101) and the National Natural Science Foundation of China (32270746, 82203247, 82203415).")
   )
-Description: looplook is a versatile R package for target assignment and functional
-    annotation of chromatin interactions. It leverages customizable genomic feature
-    integration, expression-aware refinement, and connected components clustering
-    to prioritize biologically relevant chromatin interactions. The package also
-    provides flexible tools for multi-omics data integration, functional annotation,
-    and data visualization.
+Description: Provides a versatile suite for target assignment and functional
+    annotation of 3D chromatin interactions. Leverages customizable genomic feature
+    integration, expression-aware refinement, and connected-components clustering
+    to prioritize biologically relevant chromatin loops. The pipeline also
+    supports multi-omics data integration, functional annotation (GO, GSEA,
+    motif, PPI), and publication-ready visualization.
 License: GPL (>= 3)
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
 Config/testthat/edition: 3
-SystemRequirements: libxml2, libcurl, libssl-dev, zlib1g-dev, libpng-dev, libjpeg-dev
 biocViews: Software, Epigenetics, HiC, ChIPSeq, RNASeq, 
     GeneExpression, FunctionalGenomics, GenomeAnnotation, 
     SystemsBiology, Visualization, Classification, Clustering, 
@@ -54,6 +56,8 @@ Imports:
     ggrepel,
     igraph,
     karyoploteR,
+    ChIPseeker,
+    methods,
     scales
 Suggests: 
     BiocStyle,
@@ -63,7 +67,9 @@ Suggests:
     JASPAR2020,
     TFBSTools,
     BSgenome.Hsapiens.UCSC.hg38,
+    BSgenome.Hsapiens.UCSC.hg19,
     BSgenome.Mmusculus.UCSC.mm10,
+    BSgenome.Mmusculus.UCSC.mm9,
     ggseqlogo,
     STRINGdb,
     ggraph,
@@ -72,18 +78,25 @@ Suggests:
     aplot,
     ggtext,
     ggpointdensity,
+    DT,
     viridis,
     ggpubr,
     ggdist,
+    kableExtra,
     knitr,
     rmarkdown,
+    png,
     BSgenome,
-    ChIPseeker,
+    htmltools,
     htmlwidgets,
     networkD3,
     webshot2,
     TxDb.Hsapiens.UCSC.hg38.knownGene,
+    TxDb.Hsapiens.UCSC.hg19.knownGene,
+    TxDb.Mmusculus.UCSC.mm10.knownGene,
+    TxDb.Mmusculus.UCSC.mm9.knownGene,
     org.Hs.eg.db,
+    org.Mm.eg.db,
     testthat
 URL: https://github.com/zying106/looplook, https://zying106.github.io/looplook/
 BugReports: https://github.com/zying106/looplook/issues

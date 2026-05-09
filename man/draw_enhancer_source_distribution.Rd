@@ -4,7 +4,7 @@
 \alias{draw_enhancer_source_distribution}
 \title{Draw Enhancer Source Distribution}
 \usage{
-draw_enhancer_source_distribution(loop_data, project_name, filename)
+draw_enhancer_source_distribution(loop_data, project_name, filename = NULL)
 }
 \arguments{
 \item{loop_data}{(data.frame) Must contain:

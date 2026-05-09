@@ -4,21 +4,12 @@
 \alias{.plot_top_motif_logos}
 \title{Plot Top Motif Sequence Logos}
 \usage{
-.plot_top_motif_logos(res_df, out_dir, prefix, top_n)
-}
-\arguments{
-\item{res_df}{Data frame of motif enrichment results.}
-
-\item{out_dir}{Character. Output directory.}
-
-\item{prefix}{Character. File prefix.}
-
-\item{top_n}{Integer. Number of top motifs to plot.}
+.plot_top_motif_logos(res_df, top_n, jaspar_db = JASPAR2020::JASPAR2020)
 }
 \value{
-Invisible \code{NULL}.
+A list of sequence logo plots, or \code{NULL} if input is empty.
 }
 \description{
-Retrieves Position Frequency Matrices (PFM) from JASPAR and plots sequence logos for the top N enriched motifs.
+Plot Top Motif Sequence Logos
 }
 \keyword{internal}

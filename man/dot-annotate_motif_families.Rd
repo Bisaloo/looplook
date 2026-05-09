@@ -4,15 +4,16 @@
 \alias{.annotate_motif_families}
 \title{Annotate Motif Families}
 \usage{
-.annotate_motif_families(res_df)
-}
-\arguments{
-\item{res_df}{Data frame. Motif enrichment results from \code{.calc_motif_enrichment}.}
+.annotate_motif_families(
+  res_df,
+  jaspar_db = JASPAR2020::JASPAR2020,
+  jaspar_collection = "CORE"
+)
 }
 \value{
-Data frame with an appended \code{Family} column.
+A data frame with added \code{Family} column, sorted by P-value.
 }
 \description{
-Appends JASPAR TF family annotations to the motif enrichment results.
+Annotate Motif Families
 }
 \keyword{internal}

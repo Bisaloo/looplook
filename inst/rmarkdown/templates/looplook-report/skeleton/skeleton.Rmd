@@ -1,0 +1,1009 @@
+---
+title: "looplook: Topology-Driven Target Assignment and Functional Inference Report"
+author: "`r params$project_name`"
+date: "`r Sys.Date()`"
+output:
+  BiocStyle::html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    code_folding: hide
+    fig_caption: true
+params:
+  bedpe_file: ""
+  target_bed: null
+  expr_matrix_file: null
+  sample_columns: null
+  tss_region: [-2000, 2000]
+  species: "hg38"
+  project_name: "looplook Analysis"
+  out_dir: "looplook_results"
+  threshold: 1.0
+  unit_type: "TPM"
+  reclassify_by_expression: true
+  neighbor_hop: 0
+  hub_percentile: 0.95
+  color_palette: "Set2"
+  target_source: "targets"
+  target_mapping_mode: "all"
+  include_Filled: true
+  use_nearest_gene: false
+  loop_types: ["E-P", "P-P"]
+  stat_test: "wilcox.test"
+  run_go: true
+  run_ppi: false
+  run_motif: false
+  genome_id: ""
+  motif_p_thresh: 1e-4
+  motif_ntop: 5
+  ppi_score: 400
+  ppi_nSample: 400
+  heatmap_nSample: 99999
+  gsea_nSample: 99999
+  cnet_nSample: 50
+  karyo_bin_size: 100000
+  diff_file: null
+  lfc_col: "log2FoldChange"
+  metadata_file: null
+  precomputed_res: null
+---
+
+<style>
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+  .metric-container {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin: 25px 0;
+  }
+  .metric-card {
+    flex: 1;
+    min-width: 160px;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+    transition: transform 0.2s ease-in-out;
+  }
+  .metric-card:hover {
+    transform: translateY(-5px);
+  }
+  .metric-value {
+    font-size: 26px;
+    font-weight: 800;
+    margin-bottom: 5px;
+  }
+  .metric-label {
+    font-size: 11px;
+    color: #666;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .bg-blue { background-color: #EBF5FB; color: #2B579A; }
+  .bg-orange { background-color: #FEF9E7; color: #E67E22; }
+  .bg-green { background-color: #EAFAF1; color: #27AE60; }
+  .bg-purple { background-color: #F5EEF8; color: #8E44AD; }
+  
+  .status-box {
+    padding: 15px 20px;
+    border-left: 5px solid;
+    border-radius: 4px;
+    margin: 20px 0;
+    font-size: 0.95em;
+  }
+  .status-info { background: #EBF5FB; border-color: #2B579A; color: #214478; }
+  .status-success { background: #EAFAF1; border-color: #27AE60; color: #1B5E20; }
+  .status-warning { background: #FEF9E7; border-color: #E67E22; color: #7E5109; }
+  .status-danger { background: #FDEDEC; border-color: #CB4335; color: #7B241C; }
+  
+  h1, h2, h3 { color: #2C3E50; font-weight: 700; }
+  .section-header { border-bottom: 2px solid #EEE; padding-bottom: 10px; margin-top: 40px; }
+  
+  .plot-container {
+    background: #FFF;
+    padding: 15px;
+    border: 1px solid #EEE;
+    border-radius: 8px;
+    margin: 20px 0;
+  }
+  
+  .table-caption {
+    font-weight: 600;
+    color: #555;
+    margin-bottom: 10px;
+    font-size: 1.1em;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo=FALSE, 
+  warning=FALSE, 
+  message=FALSE, 
+  fig.align="center",
+  fig.width=9, 
+  fig.height=7, 
+  dpi=150,
+  out.width="100%"
+)
+library(looplook)
+library(ggplot2)
+library(dplyr)
+library(knitr)
+library(scales)
+# Create output directory
+dir.create(params$out_dir, showWarnings=FALSE, recursive=TRUE)
+
+# Base R HTML escape (avoid htmltools dependency in report template)
+html_escape <- function(x) {
+  x <- as.character(x)
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;", x, fixed = TRUE)
+  x <- gsub(">", "&gt;", x, fixed = TRUE)
+  x <- gsub('"', "&quot;", x, fixed = TRUE)
+  x
+}
+
+# Helper for metric cards
+metric_card <- function(value, label, color_class = "bg-blue", background = NULL,
+                        foreground = NULL) {
+  class_colors <- list(
+    "bg-blue" = c(background = "#EBF5FB", foreground = "#2B579A"),
+    "bg-orange" = c(background = "#FEF9E7", foreground = "#E67E22"),
+    "bg-green" = c(background = "#EAFAF1", foreground = "#27AE60"),
+    "bg-purple" = c(background = "#F5EEF8", foreground = "#8E44AD")
+  )
+  if (is.null(background) || is.null(foreground)) {
+    defaults <- class_colors[[color_class]]
+    if (is.null(defaults)) defaults <- class_colors[["bg-blue"]]
+    if (is.null(background)) background <- defaults[["background"]]
+    if (is.null(foreground)) foreground <- defaults[["foreground"]]
+  }
+
+  sprintf(
+    '<div class="metric-card %s" style="background-color:%s; color:%s; flex:1; min-width:160px; padding:20px; border-radius:10px; text-align:center; box-shadow:0 4px 6px rgba(0,0,0,0.05);">\n  <div class="metric-value" style="font-size:26px; font-weight:800; margin-bottom:5px; color:%s;">%s</div>\n  <div class="metric-label" style="font-size:11px; color:%s; font-weight:500; text-transform:uppercase; letter-spacing:0.5px;">%s</div>\n</div>',
+    html_escape(color_class), background, foreground, foreground,
+    html_escape(as.character(value)), foreground, html_escape(as.character(label)))
+}
+
+metric_container <- function(cards) {
+  paste0(
+    '\n<div class="metric-container" style="display:flex; gap:20px; flex-wrap:wrap; margin:25px 0;">\n',
+    paste(cards, collapse = "\n"),
+    '\n</div>\n'
+  )
+}
+
+has_dt <- isTRUE(getOption("looplook.report.dt", TRUE)) &&
+  isTRUE(tryCatch(requireNamespace("DT", quietly = TRUE), error = function(e) FALSE))
+
+render_table <- function(df, page_length = 10, scroll_x = TRUE, head_n = 20,
+                         searching = TRUE) {
+  if (is.null(df) || nrow(df) == 0 || ncol(df) == 0) return(invisible(NULL))
+  if (has_dt) {
+    opts <- list(pageLength = page_length, scrollX = scroll_x, searching = searching)
+    widget <- tryCatch(
+      DT::datatable(df, options = opts, class = "stripe hover compact", rownames = FALSE),
+      error = function(e) NULL
+    )
+    if (!is.null(widget)) {
+      if (requireNamespace("htmltools", quietly = TRUE)) {
+        return(htmltools::tagList(widget))
+      } else {
+        return(widget)
+      }
+    }
+  }
+  knitr::kable(utils::head(df, head_n), format = "html")
+}
+
+repair_empty_manual_scales <- function(p) {
+  if (!inherits(p, "ggplot")) return(p)
+  build_ok <- isTRUE(tryCatch({ ggplot2::ggplot_build(p); TRUE },
+    error = function(e) !grepl("Insufficient values in manual scale", conditionMessage(e))))
+  if (build_ok) return(p)
+
+  get_mapped_values <- function(aesthetic) {
+    aes_expr <- p$mapping[[aesthetic]]
+    if (is.null(aes_expr)) return(NULL)
+    var <- all.vars(aes_expr)[1]
+    if (is.na(var) || !var %in% colnames(p$data)) return(NULL)
+    vals <- unique(as.character(stats::na.omit(p$data[[var]])))
+    if (length(vals) == 0) return(NULL)
+    vals
+  }
+
+  fill_vals <- get_mapped_values("fill")
+  color_vals <- get_mapped_values("colour")
+  if (is.null(color_vals)) color_vals <- get_mapped_values("color")
+
+  drop_aes <- c()
+  if (!is.null(fill_vals)) drop_aes <- c(drop_aes, "fill")
+  if (!is.null(color_vals)) drop_aes <- c(drop_aes, "colour", "color")
+  if (length(drop_aes) == 0) return(p)
+
+  report_colors <- function(n, palette_input) {
+    brewer_info <- RColorBrewer::brewer.pal.info
+    if (length(palette_input) == 1 && palette_input %in% rownames(brewer_info)) {
+      max_avail <- brewer_info[palette_input, "maxcolors"]
+      base_cols <- RColorBrewer::brewer.pal(max(3, min(max_avail, n)), palette_input)
+      return(grDevices::colorRampPalette(base_cols)(n))
+    }
+    if (length(palette_input) >= n) return(palette_input[seq_len(n)])
+    if (length(palette_input) > 0) return(grDevices::colorRampPalette(palette_input)(n))
+    scales::hue_pal()(n)
+  }
+
+  p$scales$scales <- Filter(function(s) !any(s$aesthetics %in% drop_aes), p$scales$scales)
+  if (!is.null(fill_vals)) {
+    cols <- report_colors(length(fill_vals), params$color_palette)
+    names(cols) <- fill_vals
+    p <- p + ggplot2::scale_fill_manual(values = cols)
+  }
+  if (!is.null(color_vals)) {
+    cols <- report_colors(length(color_vals), params$color_palette)
+    names(cols) <- color_vals
+    p <- p + ggplot2::scale_color_manual(values = cols)
+  }
+  p
+}
+
+render_plot_container <- function(plot_obj, title = NULL, description = NULL, draw = print) {
+  if (!is.null(title)) {
+    cat(sprintf("\n\n### %s\n\n", html_escape(title)))
+  }
+  if (!is.null(description) && nzchar(description)) {
+    cat(sprintf('<div style="margin-bottom:12px; color:#555; font-size:0.92em; line-height:1.5;">%s</div>\n', description))
+  }
+  cat('<div class="plot-container">')
+  tryCatch(
+    draw(repair_empty_manual_scales(plot_obj)),
+    error = function(e) {
+      cat(sprintf(
+        '<div class="status-box status-warning"><strong>Plot not rendered.</strong> %s</div>',
+        html_escape(conditionMessage(e))
+      ))
+    }
+  )
+  cat('</div>\n')
+  invisible(NULL)
+}
+
+# ---- Plot interpretation descriptions ----
+plot_descriptions <- list(
+  Basic_Circular = "The Circular plot quantifies unique target genes per loop type, intuitively illustrating how certain loop types might disproportionately regulate target genes.",
+  Basic_Flower = "A simplified flower plot showing the intersection of target genes (Core vs. Unique) across different loop types.",
+  Basic_Donut = "The Donut chart visualizes the raw physical frequency of each topological interaction.",
+  Target_Rose = "Coxcomb chart illustrating the dominant 3D topologies associated with user-defined genomic features.",
+  Anchor_Genomic_Distribution = "Pie chart summarizing the genomic context of 3D anchors (e.g., Distal Intergenic, Intron, Promoter).",
+  Target_Genomic_Distribution = "Compares the genomic distribution of input genomic features (peaks) versus those successfully linked via 3D loops. This comparison is insightful for demonstrating the enrichment of spatial interactions.",
+  Target_Loop_Genomic_Distribution = "Profiles the genomic distribution of loop anchors that are spatially linked to the input target regions. This reveals the regulatory landscape of the regions physically interacting with your target features.",
+  Karyo_Anchors = "This karyotype heatmap displays the chromosomal density of loop anchors across the genome. Colour intensity represents anchor count per genomic bin. Peaks indicate chromosomes or loci with high regulatory activity.",
+  Karyo_LoopGenes = "This karyotype heatmap shows the chromosomal distribution of genes connected via chromatin loops. High-density regions may indicate transcriptionally active chromosomal territories.",
+  Karyo_TargetGenes = "This karyotype heatmap shows the chromosomal density of assigned target genes. Comparing with Karyo_Anchors reveals whether regulatory features and their targets co-localise on the same chromosomes or operate in trans.",
+  Comparison_Dumbbell = "This dumbbell chart compares the count of each loop type before (grey dot) versus after (yellow dot) expression-based filtering. The connecting line indicates the magnitude of change. Large drops suggest that many loops of that type involved transcriptionally silent genes.",
+  Rose = "This post-refinement rose chart shows the proportion of remaining loop types after expression-aware filtering. It reveals which interaction topologies are most robust to expression-based quality control.",
+  Target_Loop_Donut = "This post-refinement donut plot shows the genomic annotation distribution of target features after removing transcriptionally silent contacts. Comparing with the pre-refinement Target_Rose reveals how expression filtering reshapes the regulatory landscape.",
+  Refined_Karyo_Active = "This karyotype heatmap displays the chromosomal density of active (expressed) regulatory elements after refinement. Colour intensity reflects the density of features whose linked genes exceed the expression threshold.",
+  Refined_Karyo_TargetGenes = "This karyotype heatmap shows the chromosomal distribution of target genes retained after expression filtering. Comparing with the pre-refinement Karyo_TargetGenes reveals chromosomes where target assignments were most affected by transcriptional filtering.",
+  Target_Sankey = "Core integration diagnostic that maps the fate of inputted genomic features across three logical tiers: Genomic Region (L1) → 3D Loop Connection (L2) → Target Expression Status (L3). This intuitively reveals the proportion of GWAS/ChIP-seq peaks structurally connected to functionally active genes.",
+  LFC_Violin = "This violin plot compares the LFC (log2 fold-change) distribution of target gene sets across comparison groups. Each violin's width reflects the density of genes at a given LFC value. Significant shifts between groups indicate differential regulation of target gene cohorts.",
+  GSEA = "This GSEA (Gene Set Enrichment Analysis) plot shows the running enrichment score along the ranked gene list. Peaks indicate whether target genes are enriched among the most differentially expressed genes.",
+  Scatter = "This scatter plot visualises the relationship between gene expression (log2 fold-change) and some connectivity metric (e.g., number of linked loops). Each point is a target gene. A trend line or correlation indicates whether highly connected genes tend to be more differentially expressed.",
+  Heatmap = "This heatmap displays the expression levels of target genes across samples. Rows are genes, columns are samples, and colour intensity represents normalised expression (Z-score). Hierarchical clustering groups genes with similar expression patterns, which may indicate co-regulation.",
+  GO_Network = "This network plot visualises enriched Gene Ontology terms as nodes, with edges connecting terms that share overlapping gene sets. Node size reflects the number of genes in each term; colour indicates the adjusted p-value. Tight clusters suggest functionally related biological processes.",
+  GO_Lollipop = "This lollipop chart ranks enriched GO terms by statistical significance. The x-axis shows the gene count or enrichment ratio, and dot colour indicates the adjusted p-value. It provides a ranked summary of the most significant biological functions associated with target genes.",
+  PPI_Network = "This protein-protein interaction network shows physical and functional associations among target gene products. Nodes are proteins, edges are STRING interactions. Hub nodes (high degree) may represent key regulatory proteins that coordinate the target gene program.",
+  Proximal_Motif_Bar = "This bar chart shows the top enriched transcription factor binding motifs identified in the proximal regions (TSS-flanking) of target genes. Bar length indicates enrichment significance. Highly enriched motifs suggest transcription factors that may directly regulate the target gene set.",
+  Proximal_Motif_Rank = "This rank scatter plot compares motif enrichment rankings between two conditions or gene sets. Each point is a motif, and its position reflects its rank in each comparison. Points far from the diagonal indicate motifs with condition-specific enrichment.",
+  Proximal_Motif_Logos = "Sequence logos showing the nucleotide preference of the top enriched motifs in proximal target gene promoters. The height of each letter reflects information content at that position; taller stacks indicate stronger base preference, which corresponds to higher binding specificity.",
+  Distal_Motif_Bar = "Same as Proximal_Motif_Bar, but for motifs enriched in distal regulatory elements (enhancers) linked to target genes via 3D contacts. These motifs may represent transcription factors that act through long-range chromatin interactions.",
+  Distal_Motif_Rank = "Same as Proximal_Motif_Rank, but comparing motif enrichment in distal regulatory regions across conditions. This highlights transcription factors whose distal binding preference changes between biological contexts.",
+  Distal_Motif_Logos = "Sequence logos for the top enriched motifs in distal regulatory elements. Comparing proximal and distal logos can reveal whether the same or different transcription factors operate at promoters versus enhancers."
+)
+
+is_present_path <- function(x) {
+  is.character(x) && length(x) > 0 && !is.na(x[1]) && nzchar(x[1])
+}
+
+require_existing_path <- function(path, label, required = FALSE) {
+  if (!is_present_path(path)) {
+    if (required) stop(label, " path is empty.")
+    return(NULL)
+  }
+  if (!file.exists(path)) stop(label, " not found: ", path)
+  normalizePath(path, mustWork = TRUE)
+}
+
+# Resolve precomputed results early so summary-block can use them
+precomp <- params$precomputed_res
+if (!is.null(precomp)) {
+  if (is.list(precomp)) {
+    res <- precomp
+    use_precomputed <- TRUE
+    has_precomp <- TRUE
+  } else if (is.character(precomp) && nzchar(precomp) && file.exists(precomp)) {
+    tmp_env <- new.env()
+    load(precomp, envir = tmp_env)
+    if (exists("res_integrated", envir = tmp_env)) {
+      res <- get("res_integrated", envir = tmp_env)
+    } else {
+      objs <- ls(tmp_env)
+      is_l <- vapply(objs, function(x) is.list(get(x, envir = tmp_env)), logical(1))
+      if (any(is_l)) res <- get(objs[which(is_l)[1]], envir = tmp_env)
+      else stop("Could not find suitable result object in precomputed_res.")
+    }
+    use_precomputed <- TRUE
+    has_precomp <- TRUE
+  } else {
+    has_precomp <- FALSE
+    use_precomputed <- FALSE
+  }
+} else {
+  has_precomp <- FALSE
+  use_precomputed <- FALSE
+}
+
+# Example data are only used when the RStudio template is opened without params.
+# In looplook_report(), NULL optional paths should mean "skip this module".
+use_example_data <- !is_present_path(params$bedpe_file) && !has_precomp
+
+bedpe_path <- require_existing_path(
+  if (use_example_data) system.file("extdata", "example_loops_1.bedpe", package = "looplook") else params$bedpe_file,
+  "BEDPE", required = !has_precomp  # optional when precomputed results are provided
+)
+peak_path <- require_existing_path(
+  if (use_example_data && !is_present_path(params$target_bed)) system.file("extdata", "example_peaks.bed", package = "looplook") else params$target_bed,
+  "Target BED"
+)
+expr_path <- require_existing_path(
+  if (use_example_data && !is_present_path(params$expr_matrix_file)) system.file("extdata", "example_tpm.txt", package = "looplook") else params$expr_matrix_file,
+  "Expression matrix"
+)
+diff_path <- require_existing_path(
+  if (use_example_data && !is_present_path(params$diff_file)) system.file("extdata", "example_deg.txt", package = "looplook") else params$diff_file,
+  "Differential expression file"
+)
+meta_path <- require_existing_path(
+  if (use_example_data && !is_present_path(params$metadata_file)) system.file("extdata", "example_coldata.txt", package = "looplook") else params$metadata_file,
+  "Sample metadata"
+)
+
+has_expr <- !is.null(expr_path)
+has_peaks <- !is.null(peak_path)
+has_profiling <- has_expr && !is.null(diff_path) && !is.null(meta_path)
+expr_sample_columns <- params$sample_columns
+if (has_expr && is.null(expr_sample_columns)) {
+  expr_cols <- colnames(data.table::fread(expr_path, nrows = 0, showProgress = FALSE))
+  expr_sample_columns <- expr_cols[-1]
+}
+refined <- NULL
+refinement_error <- NULL
+profile_res <- NULL
+pr <- NULL
+has_pr <- FALSE
+has_plots <- FALSE
+show_htmlwidgets <- isTRUE(getOption("looplook.report.htmlwidgets", TRUE))
+effective_run_ppi <- isTRUE(params$run_ppi)
+ppi_preflight_warning <- NULL
+```
+
+# Executive Summary {.section-header}
+
+```{r summary-block, results='asis'}
+if (has_precomp) {
+  n_loops <- nrow(res$loop_annotation)
+  n_peaks <- if (!is.null(res$target_annotation)) nrow(res$target_annotation) else 0L
+  loop_source <- "precomputed result"
+} else {
+  loops_raw <- read.table(bedpe_path, header=FALSE, sep="\t", stringsAsFactors=FALSE)
+  n_loops <- nrow(loops_raw)
+  n_peaks <- if (has_peaks) nrow(read.table(peak_path, header=FALSE, sep="\t")) else 0L
+  loop_source <- basename(bedpe_path)
+}
+
+cat('<div class="status-box status-info">')
+cat(sprintf("This report presents the multi-omics integration results for <strong>%s</strong>. ",
+  html_escape(params$project_name)))
+cat("The pipeline maps genomic features (derived from ChIP-seq, CUT&Tag, CUT&RUN, or GWAS) to their target genes using both spatial chromatin topology and linear proximity, providing a high-confidence map of the regulatory landscape.")
+cat('</div>')
+
+cat("\n\n### Input Data Overview\n\n")
+cat("| Data Type | Source / Value |", "|:---|:---|", sep="\n")
+cat(sprintf("| **Chromatin Loops** | %s interactions (%s) |", comma(n_loops), loop_source))
+if (n_peaks > 0) {
+  peak_src <- if (has_precomp) "precomputed result" else basename(peak_path)
+  cat(sprintf("\n| **Genomic Features** | %s regions (%s) |", comma(n_peaks), peak_src))
+}
+if (has_expr) {
+  cat(sprintf("\n| **Expression Matrix** | %s |", basename(expr_path)))
+}
+cat(sprintf("\n| **Genome Assembly** | %s |", params$species))
+cat(sprintf("\n| **Parameters** | Hub Percentile: %.0f%%, Neighbor Hop: %s |", 
+    params$hub_percentile * 100, params$neighbor_hop))
+
+cat("\n\n### Analysis Pipeline\n\n")
+cat("The following analysis modules were executed:\n\n")
+cat("1. **3D-Guided Assignment:** Hierarchical peak-to-gene mapping via spatial contacts and proximity fallback.\n")
+if (has_expr) {
+  cat(sprintf("2. **Expression Refinement:** Filtering silent contacts (TPM < %.1f) and topology reclassification (P to eP).\n", params$threshold))
+}
+if (has_profiling) {
+  cat("3. **Functional Profiling:** Multi-set differential expression analysis, GO/GSEA enrichment, and distal motif scanning.\n")
+}
+```
+
+# 3D-Guided Target Gene Assignment {.section-header}
+
+```{r annotation-core, results='asis'}
+t0 <- Sys.time()
+if (!use_precomputed) {
+  res <- annotate_peaks_and_loops(
+    bedpe_file = bedpe_path,
+    target_bed = if (has_peaks) peak_path else NULL,
+    expr_matrix_file = if (has_expr) expr_path else NULL,
+    sample_columns = expr_sample_columns,
+    species = params$species,
+    tss_region = params$tss_region,
+    neighbor_hop = params$neighbor_hop,
+    hub_percentile = params$hub_percentile,
+    color_palette = params$color_palette,
+    out_dir = params$out_dir,
+    project_name = params$project_name
+  )
+}
+
+ta <- res$target_annotation
+la <- res$loop_annotation
+n_targets <- if (!is.null(ta)) nrow(ta) else 0L
+n_linked <- if (!is.null(ta) && n_targets > 0 && "Linked_Loop_IDs" %in% colnames(ta))
+  sum(!is.na(ta$Linked_Loop_IDs) & ta$Linked_Loop_IDs != "", na.rm=TRUE) else 0L
+pct_linked <- if (n_targets > 0) round(n_linked / n_targets * 100, 1) else 0
+n_loop_types <- length(unique(la$loop_type))
+
+# Run refinement early (if expression data) so we can show pre/post type counts
+if (has_expr) {
+  refined <- tryCatch(
+    refine_loop_anchors_by_expression(
+      annotation_res = res,
+      expr_matrix_file = expr_path,
+      sample_columns = expr_sample_columns,
+      threshold = params$threshold,
+      unit_type = params$unit_type,
+      reclassify_by_expression = params$reclassify_by_expression,
+      color_palette = params$color_palette,
+      karyo_bin_size = params$karyo_bin_size,
+      out_dir = params$out_dir,
+      project_name = params$project_name
+    ),
+    error = function(e) {
+      refinement_error <<- conditionMessage(e)
+      NULL
+    }
+  )
+}
+elapsed <- round(difftime(Sys.time(), t0, units="mins"), 1)
+if (!is.null(refined) && !is.null(refined$loop_annotation)) {
+  n_refined_types <- length(unique(refined$loop_annotation$loop_type))
+  type_display <- paste0(n_loop_types, "/", n_refined_types)
+} else {
+  type_display <- as.character(n_loop_types)
+}
+
+cat(metric_container(list(
+  metric_card(comma(n_targets), "features mapped", "bg-blue"),
+  metric_card(paste0(pct_linked, "%"), "linked via 3D contacts", "bg-orange"),
+  metric_card(type_display, "interaction types (pre/post)", "bg-green"),
+  metric_card(paste0(elapsed, " min"), "computation time", "bg-purple")
+)))
+
+dominant_type <- names(sort(table(la$loop_type), decreasing=TRUE))[1]
+cat(sprintf("\nOf the **%s** features analyzed, **%s%%** were successfully linked to target genes via spatial chromatin contacts. The dominant interaction topology observed is **%s**.\n",
+  comma(n_targets), pct_linked, dominant_type))
+```
+
+## Global Topology Summary
+
+```{r annotation-donut, results='asis', fig.cap="Figure 1: Composition of the Spatial Interaction Landscape."}
+if (!is.null(res$plots) && !is.null(res$plots$Basic_Donut)) {
+  render_plot_container(res$plots$Basic_Donut,
+    description = plot_descriptions[["Basic_Donut"]])
+}
+```
+
+## Detailed Assignments
+
+<div class="status-box status-info"><strong>Note:</strong> Column descriptions for all tables below are documented in the package vignettes. Run <code>browseVignettes("looplook")</code> for full metadata definitions.</div>
+
+<div class="table-caption">Feature-to-Target Mapping</div>
+```{r annotation-table-top}
+if (!is.null(ta) && nrow(ta) > 0) {
+  coord_cols <- intersect(c("seqnames", "start", "end", "width"), colnames(ta))
+  anno_cols  <- intersect(c("annotation", "SYMBOL", "loop_type",
+    "Linked_Loop_IDs", "All_Loop_Connected_Genes",
+    "Regulated_promoter_genes", "Assigned_Target_Genes",
+    "All_Loop_Connected_Genes_Filled",
+    "Regulated_promoter_genes_Filled",
+    "Assigned_Target_Genes_Filled"), colnames(ta))
+  show_cols <- c(coord_cols, anno_cols)
+  show_cols <- show_cols[vapply(ta[show_cols], function(x) !all(is.na(x)), logical(1))]
+  
+  render_table(ta[, show_cols])
+}
+```
+
+<div class="table-caption">Loop Annotation (by Topology)</div>
+```{r annotation-table-loops}
+la <- res$loop_annotation
+if (!is.null(la) && nrow(la) > 0) {
+  loop_show <- intersect(c("loop_ID", "chr1", "start1", "end1", "chr2", "start2", "end2",
+    "loop_type", "anchor1_gene", "anchor2_gene", "All_Anchor_Genes",
+    "Putative_Target_Genes", "Cluster_All_Genes"), colnames(la))
+  render_table(la[, loop_show])
+}
+```
+
+<div class="table-caption">Promoter Connectivity Statistics</div>
+```{r annotation-table-promoter}
+pc <- res$promoter_centric_stats
+if (!is.null(pc) && nrow(pc) > 0) {
+  render_table(pc[order(pc$Total_Loops, decreasing = TRUE), ])
+}
+```
+
+<div class="table-caption">Distal Element Connectivity Statistics</div>
+```{r annotation-table-distal}
+de <- res$distal_element_stats
+if (!is.null(de) && nrow(de) > 0) {
+  render_table(de[order(de$n_Linked_Promoters, decreasing = TRUE), ])
+}
+```
+
+## Spatial Visualization
+
+```{r annotation-plots, results='asis'}
+if (!is.null(res$plots)) {
+  plot_nms <- c("Basic_Circular", "Basic_Flower", "Target_Rose",
+    "Anchor_Genomic_Distribution", "Target_Genomic_Distribution",
+    "Target_Loop_Genomic_Distribution")
+
+  for (nm in plot_nms) {
+    if (!is.null(res$plots[[nm]])) {
+      render_plot_container(res$plots[[nm]],
+        title = gsub("_", " ", nm),
+        description = plot_descriptions[[nm]])
+    }
+  }
+}
+```
+
+## Genomic Landscape
+
+```{r annotation-karyo, results='asis'}
+if (!is.null(res$plots)) {
+  karyo_nms <- c("Karyo_Anchors", "Karyo_LoopGenes", "Karyo_TargetGenes")
+  for (nm in karyo_nms) {
+    if (!is.null(res$plots[[nm]])) {
+      render_plot_container(res$plots[[nm]],
+        title = gsub("_", " ", nm),
+        description = plot_descriptions[[nm]])
+    }
+  }
+}
+```
+
+# Expression-Aware Refinement {.section-header}
+
+```{r refinement-run}
+# Refinement already executed in annotation-core to feed the pre/post type count.
+# refined and refinement_error are already set.
+if (!has_expr) {
+  refined <- NULL
+}
+```
+
+```{r refinement-summary, results='asis'}
+if (has_expr && !is.null(refined)) {
+  rla <- refined$loop_annotation
+  n_original <- nrow(res$loop_annotation)
+  n_filtered <- nrow(rla)
+  n_reclass <- sum(grepl("^e", rla$loop_type))
+
+  cat('<div class="status-box status-success">')
+  cat(sprintf("<strong>Refinement complete.</strong> Applied a %s threshold of <strong>%.1f</strong>. ",
+      html_escape(params$unit_type), params$threshold))
+  cat(sprintf("%s of %s original loops passed QC (%s%% retained). ", 
+      comma(n_filtered), comma(n_original), round(n_filtered / n_original * 100, 1)))
+  cat(sprintf("<strong>%s</strong> promoter-anchors were reclassified as enhancer-like elements (eP).", comma(n_reclass)))
+  cat('</div>')
+} else {
+  cat('<div class="status-box status-warning">')
+  if (!is.null(refinement_error)) {
+    cat(sprintf("<strong>Refinement skipped.</strong> %s", html_escape(refinement_error)))
+  } else {
+    cat("<strong>No expression data provided.</strong> Skipping expression-aware refinement and reclassification.")
+  }
+  cat('</div>')
+}
+```
+
+```{r refinement-results, results='asis', eval=has_expr && !is.null(refined)}
+cat("## Refined Interaction Types\n")
+rla <- refined$loop_annotation
+orig_counts <- as.data.frame(table(res$loop_annotation$loop_type))
+names(orig_counts) <- c("loop_type", "Original")
+filt_counts <- as.data.frame(table(rla$loop_type))
+names(filt_counts) <- c("loop_type", "Filtered")
+change_df <- merge(orig_counts, filt_counts, by = "loop_type", all = TRUE)
+change_df[is.na(change_df)] <- 0
+change_df$Change <- change_df$Original - change_df$Filtered
+change_df$PctOriginal <- round(change_df$Original / sum(change_df$Original) * 100, 1)
+change_df$PctFiltered <- round(change_df$Filtered / sum(change_df$Filtered) * 100, 1)
+change_df$PctRetained <- ifelse(change_df$Original > 0,
+  round(change_df$Filtered / change_df$Original * 100, 1), NA)
+change_df$Shift <- round(change_df$PctFiltered - change_df$PctOriginal, 1)
+change_df <- change_df[order(-change_df$Original), ]
+
+cat('<div class="table-caption">Loop type changes before vs. after refinement</div>\n')
+print(render_table(change_df, head_n = Inf))
+
+
+rta <- refined$target_annotation
+if (!is.null(rta) && nrow(rta) > 0) {
+  cat("\n## Refined Target Assignments\n")
+  cat('<div class="table-caption">Refined feature-to-target mapping</div>\n')
+  coord_cols <- intersect(c("seqnames", "start", "end", "width"), colnames(rta))
+  anno_cols  <- intersect(c("annotation", "SYMBOL", "loop_type",
+    "Linked_Loop_IDs", "All_Loop_Connected_Genes",
+    "Regulated_promoter_genes", "Assigned_Target_Genes",
+    "All_Loop_Connected_Genes_Filled",
+    "Regulated_promoter_genes_Filled",
+    "Assigned_Target_Genes_Filled"), colnames(rta))
+  rshow <- c(coord_cols, anno_cols)
+  rshow <- rshow[vapply(rta[rshow], function(x) !all(is.na(x)), logical(1))]
+  print(render_table(rta[, rshow]))
+}
+
+rpc <- refined$promoter_centric_stats
+if (!is.null(rpc) && nrow(rpc) > 0) {
+  cat("\n## Refined Promoter Connectivity\n")
+  cat('<div class="table-caption">Refined promoter-centric statistics</div>\n')
+  print(render_table(rpc[order(rpc$Total_Loops, decreasing = TRUE), ]))
+}
+
+# Added Refined Loop Annotation here
+rla <- refined$loop_annotation
+if (!is.null(rla) && nrow(rla) > 0) {
+  cat("\n## Refined Loop Annotation\n")
+  cat('<div class="table-caption">Refined loop-to-gene associations (all filtered loops)</div>\n')
+  loop_show <- intersect(c("loop_ID", "chr1", "start1", "end1", "chr2", "start2", "end2",
+    "loop_type", "anchor1_gene", "anchor2_gene", "All_Anchor_Genes",
+    "Putative_Target_Genes", "Cluster_All_Genes"), colnames(rla))
+  print(render_table(rla[, loop_show]))
+}
+
+rde <- refined$distal_element_stats
+if (!is.null(rde) && nrow(rde) > 0) {
+  cat("\n## Refined Distal Element Connectivity\n")
+  cat('<div class="table-caption">Refined distal element statistics</div>\n')
+  print(render_table(rde[order(rde$n_Linked_Promoters, decreasing = TRUE), ]))
+}
+
+cat("\n## Refinement Visualizations\n")
+if (!is.null(refined$plots)) {
+  # ggplot-based plots — safe in results='asis'
+  for (nm in c("Comparison_Dumbbell", "Rose", "Target_Loop_Donut")) {
+    if (!is.null(refined$plots[[nm]])) {
+      render_plot_container(refined$plots[[nm]],
+        title = gsub("_", " ", nm),
+        description = plot_descriptions[[nm]])
+    }
+  }
+  for (nm in c("Refined_Karyo_Active", "Refined_Karyo_TargetGenes")) {
+    if (!is.null(refined$plots[[nm]])) {
+      render_plot_container(refined$plots[[nm]],
+        title = gsub("_", " ", nm),
+        description = plot_descriptions[[nm]])
+    }
+  }
+}
+```
+
+`r if(show_htmlwidgets && has_expr && !is.null(refined) && !is.null(refined$plots) && !is.null(refined$plots$Target_Sankey)) "### Multi-Omics Sankey"`
+
+```{r refinement-sankey, results='asis', eval=show_htmlwidgets && has_expr && !is.null(refined) && !is.null(refined$plots) && !is.null(refined$plots$Target_Sankey)}
+sankey_widget <- refined$plots$Target_Sankey
+sankey_widget$height <- 450
+sankey_file <- file.path(params$out_dir, "target_sankey.html")
+dir.create(params$out_dir, showWarnings = FALSE, recursive = TRUE)
+htmlwidgets::saveWidget(sankey_widget, sankey_file, selfcontained = TRUE,
+                        title = "Multi-Omics Sankey")
+if (!is.null(plot_descriptions[["Target_Sankey"]])) {
+  cat(sprintf('<div style="margin-bottom:12px; color:#555; font-size:0.92em; line-height:1.5;">%s</div>\n',
+    plot_descriptions[["Target_Sankey"]]))
+}
+# iframe src is relative to the main report HTML; both live in out_dir
+cat(sprintf('<div class="plot-container"><iframe src="target_sankey.html" width="100%%" height="450" frameborder="0" style="border:none;"></iframe></div>\n'))
+```
+
+# Functional Profiling {.section-header}
+
+```{r functional-profiling, eval=has_profiling}
+profiling_error <- NULL
+effective_run_ppi <- isTRUE(params$run_ppi)
+ppi_preflight_warning <- NULL
+if (effective_run_ppi) {
+  effective_run_ppi <- tryCatch(
+    {
+      con <- url("https://string-db.org/api/tsv-no-header/version")
+      on.exit(close(con), add = TRUE)
+      readLines(con, n = 1, warn = FALSE)
+      TRUE
+    },
+    error = function(e) {
+      ppi_preflight_warning <<- paste0("PPI network skipped: STRINGdb is not reachable (",
+        conditionMessage(e), ").")
+      FALSE
+    }
+  )
+}
+
+profile_res <- tryCatch(
+  profile_target_genes(
+    annotation_res = if (!is.null(refined)) refined else res,
+    diff_file = diff_path,
+    lfc_col = params$lfc_col,
+    expr_matrix_file = expr_path,
+    metadata_file = meta_path,
+    target_source = params$target_source,
+    target_mapping_mode = params$target_mapping_mode,
+    include_Filled = params$include_Filled,
+    use_nearest_gene = params$use_nearest_gene,
+    loop_types = params$loop_types,
+    project_name = params$project_name,
+    run_go = params$run_go,
+    run_ppi = effective_run_ppi,
+    run_motif = params$run_motif,
+    genome_id = params$genome_id,
+    motif_p_thresh = params$motif_p_thresh,
+    motif_ntop = params$motif_ntop,
+    ppi_score = params$ppi_score,
+    ppi_nSample = params$ppi_nSample,
+    heatmap_nSample = params$heatmap_nSample,
+    gsea_nSample = params$gsea_nSample,
+    cnet_nSample = params$cnet_nSample,
+    stat_test = params$stat_test
+  ),
+  error = function(e) {
+    profiling_error <<- conditionMessage(e)
+    NULL
+  }
+)
+
+pr <- if (!is.null(profile_res) && "targets" %in% names(profile_res)) profile_res$targets else NULL
+has_pr <- !is.null(pr)
+has_plots <- has_pr && !is.null(pr$plots)
+```
+
+```{r profiling-summary, results='asis'}
+if (!has_profiling) {
+  cat('<div class="status-box status-warning">')
+  cat("<strong>Profiling skipped.</strong> Provide expression, differential-expression, and metadata files.")
+  cat('</div>')
+} else if (!has_pr || is.null(pr)) {
+  cat('<div class="status-box status-danger">')
+  if (!is.null(profiling_error)) {
+    cat(sprintf("<strong>Profiling failed.</strong> %s", html_escape(profiling_error)))
+  } else {
+    cat("<strong>Profiling returned no results.</strong> Check that your differential expression file contains valid gene-level statistics.")
+  }
+  cat('</div>')
+} else {
+  n_tasks <- length(pr$target_gene_sets)
+  n_total <- sum(lengths(pr$target_gene_sets))
+  cat('<div class="status-box status-success">')
+  cat(sprintf("<strong>Profiling complete.</strong> %s target gene sets (%s genes total) | Mode: %s | GO: %s | PPI: %s | Motif: %s",
+    n_tasks, n_total, params$target_mapping_mode,
+    if(params$run_go) "On" else "Off",
+    if(effective_run_ppi) "On" else "Off",
+    if(params$run_motif) "On" else "Off"))
+  cat('</div>\n')
+  report_warnings <- c(ppi_preflight_warning, pr$warnings)
+  report_warnings <- unique(report_warnings[!is.na(report_warnings) & nzchar(report_warnings)])
+  if (length(report_warnings) > 0) {
+    has_skipped <- any(grepl("skipped", report_warnings, ignore.case = TRUE))
+    cat('<div class="status-box status-warning">')
+    cat(sprintf("<strong>%s</strong><br>",
+      if (has_skipped) "Profiling notices:" else "Profiling details:"))
+    cat(paste(html_escape(report_warnings), collapse = "<br>"))
+    cat('</div>')
+  }
+}
+```
+
+```{r profiling-results, results='asis', eval=has_profiling && has_pr}
+cat("## Target Gene Sets\n\n")
+if (!is.null(pr$target_gene_sets)) {
+  # Read DEG for expression/fold-change annotation
+  deg_df <- tryCatch({
+    d <- looplook:::read_robust_general(diff_path, header = TRUE, row_name = 1, desc = "Diff", min_cols = 1)
+    data.frame(Gene = rownames(d), LFC = d[[params$lfc_col]], stringsAsFactors = FALSE)
+  }, error = function(e) NULL)
+
+  # Read expression matrix for base expression values
+  expr_mat <- tryCatch({
+    looplook:::read_robust_general(expr_path, header = TRUE, row_name = 1, desc = "Expr", min_cols = 1)
+  }, error = function(e) NULL)
+
+  # Gene tables per set — color badge on left, heading + table on right
+  card_colors <- c("#2B579A", "#E67E22", "#27AE60", "#8E44AD", "#C0392B", "#16A085")
+  card_idx <- 1
+  for (nm in names(pr$target_gene_sets)) {
+    gs <- pr$target_gene_sets[[nm]]
+    if (length(gs) > 0) {
+      n <- length(gs)
+      color <- card_colors[((card_idx - 1) %% length(card_colors)) + 1]
+      card_idx <- card_idx + 1
+
+      df <- data.frame(Gene = gs, stringsAsFactors = FALSE)
+      if (!is.null(deg_df)) {
+        df <- merge(df, deg_df, by = "Gene", all.x = TRUE)
+      }
+      if (!is.null(expr_mat)) {
+        sample_cols <- if (is.null(expr_sample_columns)) colnames(expr_mat) else
+          intersect(expr_sample_columns, colnames(expr_mat))
+        if (length(sample_cols) > 0) {
+          mean_expr <- rowMeans(expr_mat[intersect(gs, rownames(expr_mat)),
+            sample_cols, drop = FALSE], na.rm = TRUE)
+          df$MeanExpr <- round(mean_expr[match(df$Gene, names(mean_expr))], 2)
+        }
+      }
+
+      cat(sprintf(
+        '\n<div style="display:flex; align-items:flex-start; gap:20px; margin-bottom:28px;">\n<div style="flex:0 0 100px; min-width:100px; background:%s; color:#FFF; padding:14px 10px; border-radius:8px; text-align:center;">\n<div style="font-size:26px; font-weight:800; line-height:1.1;">%s</div>\n<div style="font-size:11px; margin-top:4px; opacity:0.85; letter-spacing:0.3px;">genes</div>\n</div>\n<div style="flex:1; min-width:0;">\n<h4 style="margin:0 0 10px 0; color:#2C3E50; font-weight:700;">%s</h4>\n',
+        color, n, html_escape(nm)))
+      print(render_table(df, scroll_x = FALSE, searching = TRUE, head_n = Inf))
+      cat('</div>\n</div>\n')
+    }
+  }
+} else {
+  cat("*No target gene sets extracted.*\n")
+}
+
+# Gather plots from all task sub-lists
+all_plots <- list()
+for (task_nm in names(pr$plots)) {
+  task_plots <- pr$plots[[task_nm]]
+  if (is.list(task_plots)) {
+    all_plots <- c(all_plots, task_plots)
+  }
+}
+has_any_plot <- length(all_plots) > 0
+
+if (has_any_plot) {
+  # Expression & Connectivity
+  expr_keys <- c("LFC_Violin", "GSEA", "Scatter")
+  has_expr_plots <- any(expr_keys %in% names(all_plots))
+  if (has_expr_plots) {
+    cat("\n## Expression & Connectivity\n\n")
+    for (k in expr_keys) {
+      if (!is.null(all_plots[[k]])) {
+        render_plot_container(all_plots[[k]],
+          title = gsub("_", " ", k),
+          description = plot_descriptions[[k]])
+      }
+    }
+  }
+  if (!is.null(all_plots$Heatmap)) {
+    if (!has_expr_plots) cat("\n## Expression & Connectivity\n\n")
+    cat("### Target Expression Heatmap\n")
+    if (requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+      render_plot_container(all_plots$Heatmap,
+        description = plot_descriptions[["Heatmap"]],
+        draw = ComplexHeatmap::draw)
+    } else {
+      render_plot_container(all_plots$Heatmap,
+        description = plot_descriptions[["Heatmap"]])
+    }
+  }
+
+  # GO
+  if (params$run_go) {
+    cat("\n## Gene Ontology Enrichment\n\n")
+    go_list <- pr$go_results
+    if (is.list(go_list) && !is.data.frame(go_list))
+      go_df <- do.call(rbind, Filter(function(x) is.data.frame(x) && nrow(x) > 0, go_list))
+    else
+      go_df <- go_list
+    if (!is.null(go_df) && is.data.frame(go_df) && nrow(go_df) > 0) {
+      go_df <- go_df[order(go_df$pvalue), ]
+      show <- intersect(c("Description", "ONTOLOGY", "pvalue", "p.adjust", "Count"), colnames(go_df))
+      go_widget <- DT::datatable(go_df[, show],
+        options = list(pageLength = 10, scrollX = TRUE, searching = TRUE,
+          autoWidth = FALSE, columnDefs = list(list(width = "40%%", targets = 0))),
+        class = "stripe hover compact", rownames = FALSE)
+      if (requireNamespace("htmltools", quietly = TRUE))
+        print(htmltools::tagList(go_widget))
+      else
+        print(go_widget)
+    } else {
+      cat("*No significantly enriched GO terms found.*\n\n")
+    }
+    if (!is.null(all_plots$GO_Network)) {
+      render_plot_container(all_plots$GO_Network,
+        title = "GO Network",
+        description = plot_descriptions[["GO_Network"]])
+    }
+    if (!is.null(all_plots$GO_Lollipop)) {
+      render_plot_container(all_plots$GO_Lollipop,
+        title = "GO Lollipop",
+        description = plot_descriptions[["GO_Lollipop"]])
+    }
+  }
+
+  # PPI
+  if (params$run_ppi) {
+    cat("\n## Protein-Protein Interaction\n\n")
+    if (!is.null(all_plots$PPI_Network)) {
+      render_plot_container(all_plots$PPI_Network,
+        title = "PPI Network",
+        description = plot_descriptions[["PPI_Network"]])
+    } else {
+      cat("*PPI network not run or no interactions found.*\n\n")
+    }
+  }
+
+  # Motif
+  if (params$run_motif) {
+    cat("\n## Motif Analysis\n\n")
+    motif_keys <- c("Proximal_Motif_Bar", "Proximal_Motif_Rank", "Proximal_Motif_Logos",
+      "Distal_Motif_Bar", "Distal_Motif_Rank", "Distal_Motif_Logos")
+    has_motif <- any(motif_keys %in% names(all_plots))
+    if (has_motif) {
+      for (k in motif_keys) {
+        if (!is.null(all_plots[[k]])) {
+          cat(sprintf("### %s\n", gsub("_", " ", k)))
+          render_plot_container(all_plots[[k]],
+            description = plot_descriptions[[k]])
+        }
+      }
+    } else {
+      cat("*No enriched motifs found.*\n\n")
+    }
+  }
+} else {
+  cat("\n*No plots generated. Target genes may have no overlap with your differential expression data.*\n\n")
+}
+```
+
+# Output Files {.section-header}
+
+All results and processed data are saved in the directory: `r params$out_dir`
+
+- **`*_Basic_Results.xlsx`**: Core annotation tables including loop-to-gene mappings and promoter/distal element statistics.
+- **`*_Filtered_Results.xlsx`**: (If refinement run) Results after expression-based filtering and reclassification.
+- **`*_Profiling_Results.xlsx`**: (If profiling run) Differential expression statistics and enrichment results.
+- **`plots/`**: High-resolution PDF/PNG versions of all figures presented in this report.
+
+# Methods & Citations {.section-header .unlisted .unnumbered}
+
+**Computational Environment.** Analysis performed with `looplook` v`r packageVersion("looplook")` (R `r getRversion()`).
+
+**3D-Guided Target Assignment.** Chromatin loops are clustered using a graph-based connected-components approach (1kb gap). Target genes are assigned hierarchically: (1) Spatial contacts link features to promoters; (2) Expression-aware conflict resolution prioritizes highly expressed candidates; (3) unlooped features use a proximity-based fallback.
+
+`r if(!is.null(refined)) sprintf("**Expression Refinement.** RNA-seq data (threshold = %.1f %s) filtered silent contacts. Promoters below threshold were reclassified as enhancer-like (eP) to refine the regulatory landscape.", params$threshold, params$unit_type)`
+
+`r if(params$run_go) "**Functional Analysis.** GO enrichment (clusterProfiler, BH-adj p < 0.05) and GSEA identify biological processes associated with target gene regulation."`
+
+# Session Information {.unlisted .unnumbered}
+
+```{r sessioninfo, results='asis'}
+si <- sessionInfo()
+cat(paste0("**R version:** ", si$R.version$version.string, " &nbsp;|&nbsp; **Platform:** ", si$platform, " &nbsp;|&nbsp; **looplook:** ", as.character(packageVersion("looplook")), "\n\n"))
+
+pkgs <- sort(c(names(si$otherPkgs), names(si$loadedOnly)))
+pkg_ver <- vapply(pkgs, function(p) as.character(utils::packageVersion(p)), character(1))
+pkg_df <- data.frame(Package = pkgs, Version = pkg_ver, stringsAsFactors = FALSE)
+knitr::kable(pkg_df, format = "html", row.names = FALSE)
+```

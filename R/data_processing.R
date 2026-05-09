@@ -30,25 +30,18 @@
 #' bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
 #'
 #' # 2. Run the function (ensure file was found)
-#' if (bedpe_path != "") {
-#'   gi <- bedpe_to_gi(bedpe_path)
+#' gi <- bedpe_to_gi(bedpe_path)
 #'
-#'   # 3. Inspect the result
-#'   print(gi)
+#' # 3. Inspect the result
+#' print(gi)
 #'
-#'   # Check the imported score column
-#'   S4Vectors::mcols(gi)$score
-#' }
+#' # Check the imported score column
+#' S4Vectors::mcols(gi)$score
 bedpe_to_gi <- function(bedpe_file) {
-  # Robust read with fallback
-  df <- tryCatch(
-    {
-      data.table::fread(bedpe_file, header = FALSE, sep = "\t")
-    },
-    error = function(e) {
-      data.table::fread(bedpe_file, header = FALSE)
-    }
-  )
+  if (is.null(bedpe_file) || !file.exists(bedpe_file)) {
+    stop("BEDPE file does not exist or path is invalid: ", bedpe_file)
+  }
+  df <- data.table::fread(bedpe_file, header = FALSE)
 
   if (ncol(df) < 6) {
     stop("BEDPE file must have at least 6 columns: ", bedpe_file)
@@ -56,18 +49,17 @@ bedpe_to_gi <- function(bedpe_file) {
 
   df <- as.data.frame(df)
 
-  # Normalize anchor order: ensure (chr1, start1) <= (chr2, start2)
   swap <- (df[, 1] > df[, 4]) | (df[, 1] == df[, 4] & df[, 2] > df[, 5])
   if (any(swap)) {
     df[swap, seq_len(6)] <- df[swap, c(4, 5, 6, 1, 2, 3)]
   }
 
-  gr1 <- GenomicRanges::GRanges(df[, 1], IRanges::IRanges(df[, 2], df[, 3]))
-  gr2 <- GenomicRanges::GRanges(df[, 4], IRanges::IRanges(df[, 5], df[, 6]))
+  # BEDPE is 0-based half-open; GRanges expects 1-based closed
+  gr1 <- GenomicRanges::GRanges(df[, 1], IRanges::IRanges(df[, 2] + 1, df[, 3]))
+  gr2 <- GenomicRanges::GRanges(df[, 4], IRanges::IRanges(df[, 5] + 1, df[, 6]))
 
   gi <- InteractionSet::GInteractions(gr1, gr2, mode = "strict")
 
-  # Smart Score Detection
   final_scores <- rep(0, nrow(df))
   found <- FALSE
 
@@ -113,25 +105,16 @@ bedpe_to_gi <- function(bedpe_file) {
 #' @examples
 #' # 1. Load example data (loops that are close to each other)
 #' bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
+#' # Convert BEDPE to GInteractions object
+#' gi_raw <- bedpe_to_gi(bedpe_path)
 #'
-#' if (bedpe_path != "") {
-#'   # Convert BEDPE to GInteractions object
-#'   gi_raw <- bedpe_to_gi(bedpe_path)
+#' # 2. Run clustering
+#' res <- reduce_ginteractions(gi_raw, gap = 1000)
 #'
-#'   # 2. Run clustering
-#'   # Merge loops if their anchors are within 1000bp
-#'   res <- reduce_ginteractions(gi_raw, gap = 1000)
-#'
-#'   # 3. Inspect results
-#'   # The 'gi' element contains the merged consensus loops
-#'   print(res$gi)
-#'
-#'   # The 'membership' vector tells which original loop belongs to which cluster
-#'   head(res$membership)
-#'
-#'   # Check cluster sizes (how many loops were merged into each cluster)
-#'   table(res$membership)
-#' }
+#' # 3. Inspect results
+#' print(res$gi)
+#' head(res$membership)
+#' table(res$membership)
 reduce_ginteractions <- function(gi, gap = 1000) {
   if (length(gi) == 0) {
     return(list(gi = gi, membership = integer(0)))
@@ -160,17 +143,12 @@ reduce_ginteractions <- function(gi, gap = 1000) {
 #' # 1. Locate the example BED file included in the package
 #' bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
 #'
-#' # 2. Run the function (ensure file was found)
-#' if (bed_path != "") {
-#'   # Read BED file into a GRanges object
-#'   gr <- read_simple_bed(bed_path)
+#' # 2. Run the function
+#' gr <- read_simple_bed(bed_path)
 #'
-#'   # 3. Inspect the result
-#'   print(gr)
-#'
-#'   # Check how many peaks were loaded
-#'   length(gr)
-#' }
+#' # 3. Inspect the result
+#' print(gr)
+#' length(gr)
 read_simple_bed <- function(bed_file) {
   if (is.null(bed_file)) {
     return(NULL)
@@ -180,11 +158,12 @@ read_simple_bed <- function(bed_file) {
   }
 
   df <- data.table::fread(bed_file, header = FALSE, select = c(1, 2, 3))
-  GenomicRanges::GRanges(df$V1, IRanges::IRanges(df$V2, df$V3))
+  # BED is 0-based half-open; GRanges expects 1-based closed
+  GenomicRanges::GRanges(df$V1, IRanges::IRanges(df$V2 + 1, df$V3))
 }
 
 
-#' Consolidate and Integrate Chromatin Loops from Multiple Sources
+#' Consolidate and Integrate Chromatin Loops from Replicates or Multiple Sources
 #'
 #' @description
 #' This function consolidates chromatin loops from multiple BEDPE files. It is designed for two main purposes:
@@ -249,51 +228,49 @@ read_simple_bed <- function(bed_file) {
 #' f2 <- system.file("extdata", "example_loops_2.bedpe", package = "looplook")
 #'
 #' # 2. Run consolidation (ensure files exist)
-#' if (f1 != "" && f2 != "") {
-#'   # Example A: Intersect Mode
-#'   # Only keeps loops present in f1 that are also supported by f2
-#'   res_intersect <- consolidate_chromatin_loops(
-#'     files = c(f1, f2),
-#'     mode = "intersect",
-#'     gap = 1000,
-#'     out_file = tempfile(fileext = ".bedpe")
-#'   )
+#' # Example A: Intersect Mode
+#' # Only keeps loops present in f1 that are also supported by f2
+#' res_intersect <- consolidate_chromatin_loops(
+#'   files = c(f1, f2),
+#'   mode = "intersect",
+#'   gap = 1000,
+#'   out_file = tempfile(fileext = ".bedpe")
+#' )
 #'
-#'   # Example B: Consensus Mode (formerly Reproducible)
-#'   # Finds consensus loops supported by both replicates (default for N=2)
-#'   res_consensus <- consolidate_chromatin_loops(
-#'     files = c(f1, f2),
-#'     mode = "consensus",
-#'     gap = 1000,
-#'     out_file = tempfile(fileext = ".bedpe")
-#'   )
+#' # Example B: Consensus Mode (formerly Reproducible)
+#' # Finds consensus loops supported by both replicates (default for N=2)
+#' res_consensus <- consolidate_chromatin_loops(
+#'   files = c(f1, f2),
+#'   mode = "consensus",
+#'   gap = 1000,
+#'   out_file = tempfile(fileext = ".bedpe")
+#' )
 #'
-#'   # Example C: Union Mode
-#'   # Merges all loops into a single map
-#'   res_union <- consolidate_chromatin_loops(
-#'     files = c(f1, f2),
-#'     mode = "union",
-#'     gap = 1000,
-#'     out_file = tempfile(fileext = ".bedpe")
-#'   )
+#' # Example C: Union Mode
+#' # Merges all loops into a single map
+#' res_union <- consolidate_chromatin_loops(
+#'   files = c(f1, f2),
+#'   mode = "union",
+#'   gap = 1000,
+#'   out_file = tempfile(fileext = ".bedpe")
+#' )
 #'
-#'   # Example D: Dual Filtering Strategy (Recommended for HiChIP)
-#'   # 1. Pre-filter: Discard singletons (score < 2) to remove noise.
-#'   # 2. Merge: Find loops present in both replicates.
-#'   # 3. Post-filter: Keep only strong consensus loops (score > 5).
-#'   res_clean <- consolidate_chromatin_loops(
-#'     files = c(f1, f2),
-#'     mode = "consensus",
-#'     min_raw_score = 2, # Pre-filter (remove noise)
-#'     min_score = 5, # Post-filter (keep strong loops)
-#'     gap = 1000,
-#'     out_file = tempfile(fileext = ".bedpe")
-#'   )
+#' # Example D: Dual Filtering Strategy (Recommended for HiChIP)
+#' # 1. Pre-filter: Discard singletons (score < 2) to remove noise.
+#' # 2. Merge: Find loops present in both replicates.
+#' # 3. Post-filter: Keep only strong consensus loops (score > 5).
+#' res_clean <- consolidate_chromatin_loops(
+#'   files = c(f1, f2),
+#'   mode = "consensus",
+#'   min_raw_score = 2, # Pre-filter (remove noise)
+#'   min_score = 5, # Post-filter (keep strong loops)
+#'   gap = 1000,
+#'   out_file = tempfile(fileext = ".bedpe")
+#' )
 #'
-#'   # Inspect results
-#'   length(res_intersect)
-#'   length(res_clean)
-#' }
+#' # Inspect results
+#' length(res_intersect)
+#' length(res_clean)
 consolidate_chromatin_loops <- function(
   files = NULL,
   gap = 1000,
@@ -448,16 +425,23 @@ consolidate_chromatin_loops <- function(
     a1 <- InteractionSet::anchors(result_gi, "first")
     a2 <- InteractionSet::anchors(result_gi, "second")
 
+    # BEDPE export: convert back from 1-based closed to 0-based half-open
     out_df <- data.frame(
       chr1 = GenomicRanges::seqnames(a1),
-      start1 = GenomicRanges::start(a1),
+      start1 = GenomicRanges::start(a1) - 1L,
       end1 = GenomicRanges::end(a1),
       chr2 = GenomicRanges::seqnames(a2),
-      start2 = GenomicRanges::start(a2),
+      start2 = GenomicRanges::start(a2) - 1L,
       end2 = GenomicRanges::end(a2),
       name = ".",
       score = round(S4Vectors::mcols(result_gi)$score, 2),
-      n_members = if (!is.null(S4Vectors::mcols(result_gi)$n_reps)) S4Vectors::mcols(result_gi)$n_reps else 1,
+      n_members = if (!is.null(S4Vectors::mcols(result_gi)$n_members)) {
+        S4Vectors::mcols(result_gi)$n_members
+      } else if (!is.null(S4Vectors::mcols(result_gi)$n_reps)) {
+        S4Vectors::mcols(result_gi)$n_reps
+      } else {
+        1
+      },
       stringsAsFactors = FALSE
     )
 

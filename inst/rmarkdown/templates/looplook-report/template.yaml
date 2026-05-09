@@ -1,0 +1,3 @@
+name: "looplook Report"
+description: "3D-guided functional annotation report with expression refinement and enrichment analysis"
+create_dir: true

@@ -4,23 +4,20 @@
 \alias{.calc_motif_enrichment}
 \title{Calculate Motif Enrichment via Fisher's Exact Test}
 \usage{
-.calc_motif_enrichment(fg_gr, bg_gr, genome_obj, pval_thresh, species_id)
-}
-\arguments{
-\item{fg_gr}{GRanges object. Foreground genomic regions.}
-
-\item{bg_gr}{GRanges object. Background genomic regions.}
-
-\item{genome_obj}{BSgenome object. Reference genome sequence.}
-
-\item{pval_thresh}{Numeric. Cutoff for calling a motif match.}
-
-\item{species_id}{Numeric. Taxonomy ID for JASPAR filtering (e.g., 9606).}
+.calc_motif_enrichment(
+  fg_gr,
+  bg_gr,
+  genome_obj,
+  pval_thresh,
+  species_id,
+  jaspar_db = JASPAR2020::JASPAR2020,
+  jaspar_collection = "CORE"
+)
 }
 \value{
-Data frame of motif enrichment statistics (Pvalue, FDR, OddsRatio).
+A data frame of enrichment results, or \code{NULL} if input is empty.
 }
 \description{
-Compares motif hit frequencies between foreground (anchor regions) and background (random loops) sequences.
+Calculate Motif Enrichment via Fisher's Exact Test
 }
 \keyword{internal}

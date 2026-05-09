@@ -4,21 +4,12 @@
 \alias{.plot_motif_rank_scatter}
 \title{Plot Motif Rank Scatter}
 \usage{
-.plot_motif_rank_scatter(res_df, out_dir, prefix, fdr_thresh = 0.05)
-}
-\arguments{
-\item{res_df}{Data frame of motif enrichment results.}
-
-\item{out_dir}{Character. Output directory.}
-
-\item{prefix}{Character. File prefix.}
-
-\item{fdr_thresh}{Numeric. FDR threshold for significance coloration.}
+.plot_motif_rank_scatter(res_df, prefix, fdr_thresh = 0.05)
 }
 \value{
-Invisible \code{NULL}.
+A \code{ggplot} object, or \code{NULL} if input is empty.
 }
 \description{
-Creates a scatter plot ranking motifs by FDR, where point size represents Odds Ratio and color represents the TF Family.
+Plot Motif Rank Scatter
 }
 \keyword{internal}

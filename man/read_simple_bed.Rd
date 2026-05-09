@@ -20,15 +20,10 @@ Reads the first three columns of a BED file (chrom, start, end) and returns a
 # 1. Locate the example BED file included in the package
 bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
 
-# 2. Run the function (ensure file was found)
-if (bed_path != "") {
-  # Read BED file into a GRanges object
-  gr <- read_simple_bed(bed_path)
+# 2. Run the function
+gr <- read_simple_bed(bed_path)
 
-  # 3. Inspect the result
-  print(gr)
-
-  # Check how many peaks were loaded
-  length(gr)
-}
+# 3. Inspect the result
+print(gr)
+length(gr)
 }

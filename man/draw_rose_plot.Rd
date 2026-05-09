@@ -4,7 +4,7 @@
 \alias{draw_rose_plot}
 \title{Internal: Draw Rose Chart (Loop Counts)}
 \usage{
-draw_rose_plot(data_df, project_name, filename, color_vec)
+draw_rose_plot(data_df, project_name, filename = NULL, color_vec)
 }
 \arguments{
 \item{data_df}{Data frame containing loop information.}
