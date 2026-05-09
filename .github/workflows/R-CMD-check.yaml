@@ -28,7 +28,6 @@ jobs:
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
       R_KEEP_PKG_SOURCE: yes
-      R_LIBS_USER: ${{ runner.temp }}/R-lib
 
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +39,12 @@ jobs:
           r-version: ${{ matrix.config.r }}
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: false
+
+      - name: Set shared R library path
+        shell: Rscript {0}
+        run: |
+          lib <- file.path(Sys.getenv("RUNNER_TEMP"), "R-lib")
+          cat(sprintf("R_LIBS_USER=%s\n", lib), file = Sys.getenv("GITHUB_ENV"), append = TRUE)
 
       - name: Prepare shared R library
         shell: Rscript {0}
