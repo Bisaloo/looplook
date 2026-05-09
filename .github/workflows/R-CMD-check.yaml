@@ -46,6 +46,26 @@ jobs:
           lib <- file.path(Sys.getenv("RUNNER_TEMP"), "R-lib")
           cat(sprintf("R_LIBS_USER=%s\n", lib), file = Sys.getenv("GITHUB_ENV"), append = TRUE)
 
+      - name: Install Ubuntu system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            libxml2-dev \
+            libgit2-dev \
+            libssh2-1-dev \
+            libuv1-dev \
+            libpng-dev \
+            libjpeg-dev \
+            libfreetype6-dev \
+            libfontconfig1-dev \
+            libharfbuzz-dev \
+            libfribidi-dev \
+            qpdf \
+            ghostscript
+
       - name: Prepare shared R library
         shell: Rscript {0}
         run: |
@@ -64,7 +84,7 @@ jobs:
           options(repos = repos)
           install.packages(
             c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown"),
-            dependencies = TRUE
+            dependencies = c("Depends", "Imports", "LinkingTo")
           )
           BiocManager::install("BiocStyle", ask = FALSE, update = FALSE)
           stopifnot(
