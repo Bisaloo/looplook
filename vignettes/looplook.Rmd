@@ -85,17 +85,12 @@ Beyond its utility as an integrative tool for target gene annotation, **`looploo
 <div style="margin: 30px auto; display: table; clear: both;">
 
 ```{r comparison-table, echo=FALSE, message=FALSE, warning=FALSE}
-if (!requireNamespace("kableExtra", quietly = TRUE)) {
-  knitr::kable(comp, format = "html", escape = FALSE)
-} else {
-  library(kableExtra)
-
-# 1. 定义符号
+# 1. Define symbols
 yes  <- "<span style='color: #2E8B57;'>&#10004;</span>"
 no   <- "<span style='color: #B0BEC5;'>&#10008;</span>"
 part <- "<span style='color: #FF8F00;'>Partial</span>"
 
-# 2. 构建数据框 (已修正双引号和多余的逗号)
+# 2. Build comparison table
 comp <- data.frame(
   "Feature" = c(
     "Primary annotation scheme", "User-input 3D interactome", "User-input omics data",
@@ -112,22 +107,37 @@ comp <- data.frame(
   check.names = FALSE, stringsAsFactors = FALSE
 )
 
-# 3. 强力渲染
-knitr::kable(
-  comp, 
-  format = "html", 
-  escape = FALSE, 
-  align = c("l", "c", "c", "c", "c", "c", "c"), 
-  caption = "Comparison of core features between looplook and existing genomic annotation tools."
-) %>%
-  kable_styling(
-    bootstrap_options = c("striped", "hover"), 
-    full_width = FALSE,
-    position = "left",
-    font_size = 12
+# 3. Render with or without kableExtra
+if (!requireNamespace("kableExtra", quietly = TRUE)) {
+  knitr::kable(
+    comp,
+    format = "html",
+    escape = FALSE,
+    align = c("l", "c", "c", "c", "c", "c", "c"),
+    caption = "Comparison of core features between looplook and existing genomic annotation tools."
+  )
+} else {
+  knitr::kable(
+    comp,
+    format = "html",
+    escape = FALSE,
+    align = c("l", "c", "c", "c", "c", "c", "c"),
+    caption = "Comparison of core features between looplook and existing genomic annotation tools."
   ) %>%
-  row_spec(0, bold = TRUE, color = "black", background = "#F8F9FA", extra_css = "border: 1px solid #DDDDDD;") %>%
-  column_spec(1:7, extra_css = "border: 1px solid #DDDDDD; padding: 8px;")
+    kableExtra::kable_styling(
+      bootstrap_options = c("striped", "hover"),
+      full_width = FALSE,
+      position = "left",
+      font_size = 12
+    ) %>%
+    kableExtra::row_spec(
+      0,
+      bold = TRUE,
+      color = "black",
+      background = "#F8F9FA",
+      extra_css = "border: 1px solid #DDDDDD;"
+    ) %>%
+    kableExtra::column_spec(1:7, extra_css = "border: 1px solid #DDDDDD; padding: 8px;")
 }
 ```
 
