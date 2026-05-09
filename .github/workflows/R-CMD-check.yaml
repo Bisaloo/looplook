@@ -58,24 +58,23 @@ jobs:
         shell: Rscript {0}
         run: |
           .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
-          install.packages("BiocManager")
-          options(repos = BiocManager::repositories())
-          install.packages(c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown", "BiocStyle"))
-          remotes::install_deps(dependencies = TRUE, upgrade = "never")
-          sessioninfo::session_info()
-
-      - name: Verify vignette builder packages
-        shell: Rscript {0}
-        run: |
-          .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
+          install.packages("BiocManager", repos = "https://cloud.r-project.org")
+          repos <- BiocManager::repositories()
+          repos["CRAN"] <- "https://cloud.r-project.org"
+          options(repos = repos)
+          install.packages(
+            c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown"),
+            dependencies = TRUE
+          )
+          BiocManager::install("BiocStyle", ask = FALSE, update = FALSE)
           stopifnot(
+            requireNamespace("rcmdcheck", quietly = TRUE),
             requireNamespace("knitr", quietly = TRUE),
             requireNamespace("rmarkdown", quietly = TRUE),
             requireNamespace("BiocStyle", quietly = TRUE)
           )
-          packageVersion("knitr")
-          packageVersion("rmarkdown")
-          packageVersion("BiocStyle")
+          remotes::install_deps(dependencies = TRUE, upgrade = "never")
+          sessioninfo::session_info()
 
       - name: Run R CMD check
         shell: Rscript {0}
