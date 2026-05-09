@@ -40,9 +40,18 @@ jobs:
           http-user-agent: ${{ matrix.config.http-user-agent }}
           use-public-rspm: true
 
+      - name: Configure Bioconductor repositories
+        shell: Rscript {0}
+        run: |
+          install.packages("BiocManager")
+          repos <- BiocManager::repositories()
+          repos_txt <- paste(capture.output(dput(repos)), collapse = "\n")
+          cat("options(repos = ", repos_txt,
+              ")\n", file = "~/.Rprofile", append = TRUE, sep = "")
+
       - uses: r-lib/actions/setup-r-dependencies@v2
         with:
-          extra-packages: any::rcmdcheck, bioc::BiocVersion
+          extra-packages: any::rcmdcheck
           needs: check
 
       - uses: r-lib/actions/check-r-package@v2
