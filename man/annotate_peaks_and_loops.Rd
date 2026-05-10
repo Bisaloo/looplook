@@ -88,9 +88,9 @@ To address complex loci where a single anchor overlaps multiple promoters (e.g.,
 }
 }
 \examples{
+# Mini example files (smaller subset for fast package checks)
 if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
   requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  # Mini example files (smaller subset for fast package checks)
   bedpe_path <- system.file("extdata", "example_loops_mini.bedpe", package = "looplook")
   bed_path <- system.file("extdata", "example_peaks_mini.bed", package = "looplook")
 

@@ -85,6 +85,8 @@ Beyond its utility as an integrative tool for target gene annotation, **`looploo
 <div style="margin: 30px auto; display: table; clear: both;">
 
 ```{r comparison-table, echo=FALSE, message=FALSE, warning=FALSE}
+library(dplyr)
+library(kableExtra)
 # 1. Define symbols
 yes  <- "<span style='color: #2E8B57;'>&#10004;</span>"
 no   <- "<span style='color: #B0BEC5;'>&#10008;</span>"
