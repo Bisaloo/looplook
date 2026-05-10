@@ -45,10 +45,17 @@ reference:
       - draw_flower_simplified    # 新增：花瓣图/维恩图展示
       - draw_upset_intersections  # 新增：UpSet 交互分析图
 
+  - title: "Package Overview & Report"
+    desc: "Package-level documentation and one-click HTML report generation."
+    contents:
+      - looplook-package
+      - looplook_report
+
   - title: "Auxiliary Utilities"
     desc: "Internal helper functions for file handling and data parsing."
     contents:
-      - read_simple_bed           # 新增：基础 BED 文件读取器
+      - read_simple_bed
+      - print.looplook_karyo
 
 sidebar:
   structure: [links, license, community, citation, dev]
