@@ -109,6 +109,12 @@ jobs:
           sessioninfo::session_info()
 
       - name: Run R CMD check
+        env:
+          _R_CHECK_FORCE_SUGGESTS_: "false"
+          _R_CHECK_CRAN_INCOMING_: "false"
+          _R_CHECK_CRAN_INCOMING_REMOTE_: "false"
+          _R_CHECK_PACKAGES_USED_IGNORE_UNUSED_IMPORTS_: "false"
+          NOT_CRAN: "true"
         shell: Rscript {0}
         run: |
           .libPaths(c(Sys.getenv("R_LIBS_USER"), .libPaths()))
