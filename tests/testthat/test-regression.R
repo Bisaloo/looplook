@@ -422,3 +422,41 @@ test_that("draw_karyo_heatmap_internal stores self-contained image payload", {
   on.exit(grDevices::dev.off(), add = TRUE)
   expect_error(print(obj), NA)
 })
+
+
+# ── 17. refinement plots skip karyotype when annotation packages unavailable ─
+
+test_that("build_refinement_plots skips refined karyotype plots if TxDb/OrgDb are missing", {
+  testthat::local_mocked_bindings(
+    requireNamespace = function(package, quietly = TRUE) {
+      if (package %in% c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db")) {
+        return(FALSE)
+      }
+      base::requireNamespace(package, quietly = quietly)
+    },
+    .package = "looplook"
+  )
+
+  mock_orig <- data.frame(loop_type = c("E-P", "P-P"), stringsAsFactors = FALSE)
+  mock_loop <- data.frame(
+    loop_type = c("E-P", "P-P"),
+    Putative_Target_Genes = c("TP53", "BRCA1"),
+    stringsAsFactors = FALSE
+  )
+
+  plots <- looplook:::build_refinement_plots(
+    original_loop_df = mock_orig,
+    loop_df = mock_loop,
+    bed_info = NULL,
+    whitelist = c("TP53"),
+    project_name = "NoDb",
+    karyo_bin_size = 1e6,
+    species = "hg38"
+  )
+
+  expect_type(plots, "list")
+  expect_true("Comparison_Dumbbell" %in% names(plots))
+  expect_true("Rose" %in% names(plots))
+  expect_false("Refined_Karyo_Active" %in% names(plots))
+  expect_false("Refined_Karyo_TargetGenes" %in% names(plots))
+})

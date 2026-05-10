@@ -1074,7 +1074,9 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
     "hg19" = "org.Hs.eg.db",
     "mm10" = "org.Mm.eg.db",
     "mm9"  = "org.Mm.eg.db", NULL)
-  if (!is.null(txdb_pkg) && !is.null(org_db)) {
+  if (!is.null(txdb_pkg) && !is.null(org_db) &&
+      requireNamespace(txdb_pkg, quietly = TRUE) &&
+      requireNamespace(org_db, quietly = TRUE)) {
     txdb_obj <- utils::getFromNamespace(txdb_pkg, txdb_pkg)
     all_genes <- GenomicFeatures::genes(txdb_obj)
     org_db_obj <- utils::getFromNamespace(org_db, org_db)
