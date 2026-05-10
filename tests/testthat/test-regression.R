@@ -7,9 +7,9 @@ test_that("read_simple_bed converts 0-based start to 1-based", {
   tmp_bed <- tempfile(fileext = ".bed")
   writeLines("chr1\t0\t100", tmp_bed)
   gr <- looplook:::read_simple_bed(tmp_bed)
-  expect_equal(GenomicRanges::start(gr), 1)       # 0-based 0 → 1-based 1
-  expect_equal(GenomicRanges::end(gr), 100)       # end unchanged
-  expect_equal(GenomicRanges::width(gr), 100)     # width = end - start + 1 = 100
+  expect_equal(GenomicRanges::start(gr), 1) # 0-based 0 → 1-based 1
+  expect_equal(GenomicRanges::end(gr), 100) # end unchanged
+  expect_equal(GenomicRanges::width(gr), 100) # width = end - start + 1 = 100
 })
 
 test_that("bedpe_to_gi converts 0-based BEDPE starts to 1-based GRanges", {
@@ -18,7 +18,7 @@ test_that("bedpe_to_gi converts 0-based BEDPE starts to 1-based GRanges", {
   gi <- looplook:::bedpe_to_gi(tmp_bedpe)
   a1 <- InteractionSet::anchors(gi, type = "first")
   a2 <- InteractionSet::anchors(gi, type = "second")
-  expect_equal(GenomicRanges::start(a1), 1)   # 0-based 0 → 1-based 1
+  expect_equal(GenomicRanges::start(a1), 1) # 0-based 0 → 1-based 1
   expect_equal(GenomicRanges::start(a2), 201) # 0-based 200 → 1-based 201
 })
 
@@ -55,15 +55,20 @@ test_that("run_go_enrichment runs without attaching org.Hs.eg.db", {
     detach("package:org.Hs.eg.db", unload = TRUE, character.only = TRUE)
   }
   # Use well-known human genes that are guaranteed to map
-  genes <- c("TP53", "BRCA1", "EGFR", "MYC", "VEGFA",
-             "TNF", "IL6", "CDKN1A", "BCL2", "BAX")
+  genes <- c(
+    "TP53", "BRCA1", "EGFR", "MYC", "VEGFA",
+    "TNF", "IL6", "CDKN1A", "BCL2", "BAX"
+  )
   res <- tryCatch(
-    looplook:::run_go_enrichment(genes, org_db = "org.Hs.eg.db",
-      universe_genes = NULL),
+    looplook:::run_go_enrichment(genes,
+      org_db = "org.Hs.eg.db",
+      universe_genes = NULL
+    ),
     error = function(e) e
   )
   expect_false(inherits(res, "error"),
-    info = paste("run_go_enrichment failed:", conditionMessage(res)))
+    info = paste("run_go_enrichment failed:", conditionMessage(res))
+  )
 })
 
 
@@ -71,7 +76,7 @@ test_that("run_go_enrichment runs without attaching org.Hs.eg.db", {
 
 test_that("refine_loop_anchors_by_expression survives NULL target_annotation", {
   rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
-  expr_path  <- system.file("extdata", "example_tpm.txt", package = "looplook")
+  expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
   skip_if(rdata_path == "" || expr_path == "", "test data not available")
   tmp <- new.env()
   load(rdata_path, envir = tmp)
@@ -165,7 +170,7 @@ test_that("consolidate_chromatin_loops roundtrip preserves 0-based BEDPE start",
   exported <- read.table(out_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
   # Roundtrip: 0-based input → 1-based internal → 0-based export → 0-based output
   # The consensus of chr1:0-100 and chr1:50-150 gives anchor1 min start 0
-  expect_equal(exported[1, 2], 0)   # start1: 0-based
+  expect_equal(exported[1, 2], 0) # start1: 0-based
   # The consensus of chr1:200-300 and chr1:220-280 gives anchor2 min start 200
   expect_equal(exported[1, 5], 200) # start2: 0-based (internal 201 → 200)
 })
@@ -177,10 +182,14 @@ test_that("resolve_gene_conflicts handles empty input", {
   skip_if_not_installed("org.Hs.eg.db")
   skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
   txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
-  empty_df <- data.frame(chr = character(0), start = integer(0),
-    end = integer(0), stringsAsFactors = FALSE)
-  res <- looplook:::resolve_gene_conflicts(empty_df, txdb,
-    "org.Hs.eg.db", c(-2000, 2000), NULL)
+  empty_df <- data.frame(
+    chr = character(0), start = integer(0),
+    end = integer(0), stringsAsFactors = FALSE
+  )
+  res <- looplook:::resolve_gene_conflicts(
+    empty_df, txdb,
+    "org.Hs.eg.db", c(-2000, 2000), NULL
+  )
   expect_equal(nrow(res), 0)
 })
 
@@ -190,8 +199,10 @@ test_that("resolve_gene_conflicts handles no matching genes", {
   txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
   # Region in a gene desert (no promoters nearby)
   df <- data.frame(chr = "chr1", start = 1, end = 100, stringsAsFactors = FALSE)
-  res <- looplook:::resolve_gene_conflicts(df, txdb,
-    "org.Hs.eg.db", c(-2000, 2000), NULL)
+  res <- looplook:::resolve_gene_conflicts(
+    df, txdb,
+    "org.Hs.eg.db", c(-2000, 2000), NULL
+  )
   expect_s3_class(res, "data.frame")
   expect_true(nrow(res) >= 1)
 })
@@ -232,9 +243,11 @@ test_that("Assigned_Target_Genes is not identical to all loop-connected genes", 
   ))
   expect_true(all(vapply(seq_len(nrow(informative)), function(i) {
     assigned <- looplook:::clean_gene_names(
-      informative$Assigned_Target_Genes[i], ";")
+      informative$Assigned_Target_Genes[i], ";"
+    )
     all_genes <- looplook:::clean_gene_names(
-      informative$All_Loop_Connected_Genes[i], ";")
+      informative$All_Loop_Connected_Genes[i], ";"
+    )
     all(assigned %in% all_genes)
   }, logical(1))))
 })
@@ -438,8 +451,10 @@ test_that("profile_target_genes runs without OrgDb if GO analysis is disabled", 
   expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
   diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
   meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
-  skip_if(rdata_path == "" || expr_path == "" || diff_path == "" || meta_path == "",
-    "example data not available")
+  skip_if(
+    rdata_path == "" || expr_path == "" || diff_path == "" || meta_path == "",
+    "example data not available"
+  )
 
   tmp <- new.env()
   load(rdata_path, envir = tmp)

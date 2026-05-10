@@ -119,20 +119,26 @@ annotate_peaks_and_loops <- function(
     if (!requireNamespace(pkg, quietly = TRUE)) stop(desc, " '", pkg, "' not installed")
     list(obj = utils::getFromNamespace(pkg, pkg), pkg = pkg)
   }
-  tx_species <- list(hg38 = "TxDb.Hsapiens.UCSC.hg38.knownGene",
+  tx_species <- list(
+    hg38 = "TxDb.Hsapiens.UCSC.hg38.knownGene",
     hg19 = "TxDb.Hsapiens.UCSC.hg19.knownGene",
     mm10 = "TxDb.Mmusculus.UCSC.mm10.knownGene",
-    mm9 = "TxDb.Mmusculus.UCSC.mm9.knownGene")
-  org_species <- list(hg38 = "org.Hs.eg.db", hg19 = "org.Hs.eg.db",
-    mm10 = "org.Mm.eg.db", mm9 = "org.Mm.eg.db")
+    mm9 = "TxDb.Mmusculus.UCSC.mm9.knownGene"
+  )
+  org_species <- list(
+    hg38 = "org.Hs.eg.db", hg19 = "org.Hs.eg.db",
+    mm10 = "org.Mm.eg.db", mm9 = "org.Mm.eg.db"
+  )
 
   tx_res <- .resolve_db(txdb, tx_species, "TxDb")
   org_res <- .resolve_db(org_db, org_species, "OrgDb")
   txdb_obj <- tx_res$obj
   org_db_pkg <- org_res$pkg
   if (is.null(org_db_pkg) || !nzchar(org_db_pkg)) {
-    stop("Unable to resolve OrgDb package name from supplied object. ",
-      "Pass a package name string such as 'org.Hs.eg.db', or an installed OrgDb package object.")
+    stop(
+      "Unable to resolve OrgDb package name from supplied object. ",
+      "Pass a package name string such as 'org.Hs.eg.db', or an installed OrgDb package object."
+    )
   }
 
   gene_expr_map <- NULL
@@ -194,9 +200,11 @@ annotate_peaks_and_loops <- function(
   message("Step 3: Biological Classification & Topology...")
   if (length(gr_anchors) == 0) {
     warning("No valid loop anchors found; returning empty annotation.")
-    return(list(anchor_annotation = data.frame(), loop_annotation = data.frame(),
+    return(list(
+      anchor_annotation = data.frame(), loop_annotation = data.frame(),
       promoter_centric_stats = data.frame(), distal_element_stats = data.frame(),
-      target_annotation = NULL, plots = list()))
+      target_annotation = NULL, plots = list()
+    ))
   }
   anchor_anno <- ChIPseeker::annotatePeak(gr_anchors, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
   anchor_anno_df <- format_annotation_columns(as.data.frame(anchor_anno))
@@ -365,7 +373,7 @@ annotate_peaks_and_loops <- function(
       warning("Target BED contains no features; skipping target annotation.")
       bed_info <- NULL
     } else {
-      bed_target$start <- bed_target$start + 1  # BED is 0-based; GRanges is 1-based
+      bed_target$start <- bed_target$start + 1 # BED is 0-based; GRanges is 1-based
       gr_bed <- GenomicRanges::makeGRangesFromDataFrame(bed_target)
       gr_bed$input_id <- paste0("Peak_", seq_len(nrow(bed_target)))
       names(gr_bed) <- gr_bed$input_id
@@ -482,10 +490,11 @@ annotate_peaks_and_loops <- function(
 #' @param karyo_bin_size Integer. Bin size for karyotype heatmaps.
 #' @return A named list of ggplot / grob objects.
 #' @keywords internal
-build_annotation_plots <- function(plot_df, bed_info, cluster_info,
+build_annotation_plots <- function(
+  plot_df, bed_info, cluster_info,
   target_connected_loops, txdb_obj, org_db_pkg, species, project_name,
-  color_palette, karyo_bin_size) {
-
+  color_palette, karyo_bin_size
+) {
   loop_types_sorted <- sort(unique(plot_df$loop_type))
   custom_colors <- get_colors(length(loop_types_sorted), color_palette)
   names(custom_colors) <- loop_types_sorted
@@ -512,13 +521,18 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
     ggplot2::coord_polar(theta = "y") +
     ggplot2::xlim(0.5, 2.9) +
     ggplot2::geom_text(ggplot2::aes(x = 2.65, label = loop_type),
-      position = ggplot2::position_stack(vjust = 0.5), size = 2.5) +
-    ggplot2::scale_fill_manual(values = rev(custom_colors),
-      labels = setNames(donut_data$legend_label, donut_data$loop_type)) +
+      position = ggplot2::position_stack(vjust = 0.5), size = 2.5
+    ) +
+    ggplot2::scale_fill_manual(
+      values = rev(custom_colors),
+      labels = setNames(donut_data$legend_label, donut_data$loop_type)
+    ) +
     ggplot2::theme_void() +
     ggplot2::labs(title = paste0(project_name, ": Loop Type Distribution")) +
-    ggplot2::theme(legend.position = "right",
-      plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+    ggplot2::theme(
+      legend.position = "right",
+      plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")
+    )
 
   plot_list$Basic_Circular <- draw_circular_bar_plot(plot_df, project_name, color_vec = custom_colors)
 
@@ -526,16 +540,24 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
     genes_loop <- clean_gene_names(plot_df$All_Anchor_Genes, ";")
     if (length(genes_loop) > 0) {
       all_genes_gr <- GenomicFeatures::genes(txdb_obj)
+      org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
+      valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+      primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+
       map <- AnnotationDbi::select(
-        utils::getFromNamespace(org_db_pkg, org_db_pkg),
+        org_db_obj,
         keys = as.character(S4Vectors::mcols(all_genes_gr)$gene_id),
-        columns = "SYMBOL", keytype = "ENTREZID")
+        columns = "SYMBOL", keytype = primary_key
+      )
       S4Vectors::mcols(all_genes_gr)$SYMBOL <- map$SYMBOL[match(
-        S4Vectors::mcols(all_genes_gr)$gene_id, map$ENTREZID)]
+        S4Vectors::mcols(all_genes_gr)$gene_id, map[[primary_key]]
+      )]
       target_genes_gr <- all_genes_gr[S4Vectors::mcols(all_genes_gr)$SYMBOL %in% genes_loop]
       plot_list$Karyo_LoopGenes <- draw_karyo_heatmap_internal(
         target_genes_gr, "Loop Genes Distribution", karyo_bin_size, 0.99,
-        txdb_obj, species, "Genes", custom_colors = red_palette)
+        txdb_obj, species, "Genes",
+        custom_colors = red_palette
+      )
     }
   }
 
@@ -547,7 +569,8 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
     plot_list$Karyo_Anchors <- draw_karyo_heatmap_internal(
       GenomicRanges::makeGRangesFromDataFrame(all_anchors),
       "Loop Anchor Load", karyo_bin_size, 0.99, txdb_obj, species, "Anchors",
-      custom_colors = blue_palette)
+      custom_colors = blue_palette
+    )
   }
 
   temp_df_flower <- plot_df %>%
@@ -564,7 +587,8 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
   if (nrow(cluster_info) > 0) {
     plot_list$Anchor_Genomic_Distribution <- draw_pie_with_outside_labels(
       cluster_info, "annotation",
-      paste0(project_name, ": All Anchors Genomic Distribution"), color_palette)
+      paste0(project_name, ": All Anchors Genomic Distribution"), color_palette
+    )
   }
 
   if (!is.null(bed_info)) {
@@ -572,16 +596,24 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
       genes_target <- clean_gene_names(bed_info$Assigned_Target_Genes_Filled, ";")
       if (length(genes_target) > 0) {
         all_genes_gr <- GenomicFeatures::genes(txdb_obj)
+        org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
+        valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+        primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+
         map <- AnnotationDbi::select(
-          utils::getFromNamespace(org_db_pkg, org_db_pkg),
+          org_db_obj,
           keys = as.character(S4Vectors::mcols(all_genes_gr)$gene_id),
-          columns = "SYMBOL", keytype = "ENTREZID")
+          columns = "SYMBOL", keytype = primary_key
+        )
         S4Vectors::mcols(all_genes_gr)$SYMBOL <- map$SYMBOL[match(
-          S4Vectors::mcols(all_genes_gr)$gene_id, map$ENTREZID)]
+          S4Vectors::mcols(all_genes_gr)$gene_id, map[[primary_key]]
+        )]
         target_genes_gr <- all_genes_gr[S4Vectors::mcols(all_genes_gr)$SYMBOL %in% genes_target]
         plot_list$Karyo_TargetGenes <- draw_karyo_heatmap_internal(
           target_genes_gr, "Target Genes (Assigned+Local)", karyo_bin_size,
-          0.99, txdb_obj, species, "Genes", custom_colors = purple_palette)
+          0.99, txdb_obj, species, "Genes",
+          custom_colors = purple_palette
+        )
       }
     }
 
@@ -589,34 +621,44 @@ build_annotation_plots <- function(plot_df, bed_info, cluster_info,
       target_rose_data <- target_connected_loops %>%
         dplyr::group_by(loop_type) %>%
         dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
-        dplyr::mutate(prop = n / sum(n),
-          legend_label = paste0(loop_type, " (n=", n, ", ", round(prop * 100, 1), "%)")) %>%
+        dplyr::mutate(
+          prop = n / sum(n),
+          legend_label = paste0(loop_type, " (n=", n, ", ", round(prop * 100, 1), "%)")
+        ) %>%
         dplyr::arrange(dplyr::desc(n))
 
       target_rose_data$loop_type <- factor(target_rose_data$loop_type,
-        levels = target_rose_data$loop_type)
+        levels = target_rose_data$loop_type
+      )
 
       plot_list$Target_Rose <- ggplot2::ggplot(
-        target_rose_data, ggplot2::aes(x = loop_type, y = n, fill = loop_type)) +
+        target_rose_data, ggplot2::aes(x = loop_type, y = n, fill = loop_type)
+      ) +
         ggplot2::geom_bar(stat = "identity", width = 1, color = "white") +
         ggplot2::coord_polar(theta = "x") +
-        ggplot2::scale_fill_manual(values = custom_colors,
-          labels = setNames(target_rose_data$legend_label, target_rose_data$loop_type)) +
+        ggplot2::scale_fill_manual(
+          values = custom_colors,
+          labels = setNames(target_rose_data$legend_label, target_rose_data$loop_type)
+        ) +
         ggplot2::theme_void() +
-        ggplot2::theme(legend.position = "right",
-          plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
+        ggplot2::theme(
+          legend.position = "right",
+          plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")
+        ) +
         ggplot2::labs(title = paste0(project_name, ": Target Connected Loops (Rose)"))
     }
 
     plot_list$Target_Genomic_Distribution <- draw_pie_with_outside_labels(
       bed_info, "annotation",
-      paste0(project_name, ": All Targets Genomic Distribution"), color_palette)
+      paste0(project_name, ": All Targets Genomic Distribution"), color_palette
+    )
 
     linked_bed <- bed_info %>% dplyr::filter(!is.na(Linked_Loop_IDs) & Linked_Loop_IDs != "")
     if (nrow(linked_bed) > 0) {
       plot_list$Target_Loop_Genomic_Distribution <- draw_pie_with_outside_labels(
         linked_bed, "annotation",
-        paste0(project_name, ": Loop-Connected Targets Distribution"), color_palette)
+        paste0(project_name, ": Loop-Connected Targets Distribution"), color_palette
+      )
     }
   }
 
@@ -747,15 +789,22 @@ refine_loop_anchors_by_expression <- function(
   message(sprintf("    >>> Active Genes (> %s %s): %d", threshold, unit_type, length(whitelist)))
 
   # Warn if whitelist has suspiciously low overlap with annotation genes
-  anno_genes <- unique(c(trimws(unlist(strsplit(na.omit(loop_df$anchor1_gene), ";"))),
-    trimws(unlist(strsplit(na.omit(loop_df$anchor2_gene), ";")))))
+  anno_genes <- unique(c(
+    trimws(unlist(strsplit(na.omit(loop_df$anchor1_gene), ";"))),
+    trimws(unlist(strsplit(na.omit(loop_df$anchor2_gene), ";")))
+  ))
   anno_genes <- anno_genes[nzchar(anno_genes)]
   if (length(anno_genes) > 0) {
     overlap_rate <- length(intersect(whitelist, anno_genes)) / length(anno_genes)
-    if (overlap_rate < 0.1)
-      warning(sprintf("Only %.1f%% of annotation gene symbols match the expression matrix row names. ",
-        overlap_rate * 100),
-        "Check that expression matrix row names use the same gene identifier convention (e.g., SYMBOL).")
+    if (overlap_rate < 0.1) {
+      warning(
+        sprintf(
+          "Only %.1f%% of annotation gene symbols match the expression matrix row names. ",
+          overlap_rate * 100
+        ),
+        "Check that expression matrix row names use the same gene identifier convention (e.g., SYMBOL)."
+      )
+    }
   }
 
   # --- 2. Update Anchors & Loops ---
@@ -763,10 +812,12 @@ refine_loop_anchors_by_expression <- function(
 
   a1_res <- mapply(clean_anchor, loop_df$anchor1_gene, loop_df$anchor1_type,
     MoreArgs = list(allow = whitelist, down = reclassify_by_expression),
-    SIMPLIFY = FALSE)
+    SIMPLIFY = FALSE
+  )
   a2_res <- mapply(clean_anchor, loop_df$anchor2_gene, loop_df$anchor2_type,
     MoreArgs = list(allow = whitelist, down = reclassify_by_expression),
-    SIMPLIFY = FALSE)
+    SIMPLIFY = FALSE
+  )
   loop_df$anchor1_type <- vapply(a1_res, function(x) x$type, character(1))
   loop_df$anchor1_gene <- vapply(a1_res, function(x) x$gene, character(1))
   loop_df$anchor2_type <- vapply(a2_res, function(x) x$type, character(1))
@@ -819,16 +870,21 @@ refine_loop_anchors_by_expression <- function(
   if (!is.null(bed_info)) {
     cols_to_clean <- grep("Strict|Physical|Loop_Genes|promoter|Filled|Target_Genes|Assigned", colnames(bed_info), value = TRUE)
     raw_tgt_col <- "Assigned_Target_Genes_Filled"
-    if (!raw_tgt_col %in% colnames(bed_info))
+    if (!raw_tgt_col %in% colnames(bed_info)) {
       raw_tgt_col <- grep("Filled", cols_to_clean, value = TRUE)[1]
+    }
     if (!is.na(raw_tgt_col) && raw_tgt_col %in% colnames(bed_info)) bed_info$SANKEY_RAW_GENES <- bed_info[[raw_tgt_col]]
     for (col in cols_to_clean) {
       if (col %in% colnames(bed_info)) {
         bed_info[[col]] <- vapply(as.character(bed_info[[col]]), function(x) {
-          if (is.na(x) || x == "") return(NA_character_)
+          if (is.na(x) || x == "") {
+            return(NA_character_)
+          }
           gs <- unlist(strsplit(x, ";"))
           gs_active <- gs[trimws(gs) %in% whitelist]
-          if (length(gs_active) == 0) return(NA_character_)
+          if (length(gs_active) == 0) {
+            return(NA_character_)
+          }
           return(paste(unique(sort(trimws(gs_active))), collapse = ";"))
         }, FUN.VALUE = character(1))
       }
@@ -902,9 +958,10 @@ refine_loop_anchors_by_expression <- function(
 #' @param species Character. Genome assembly.
 #' @return A named list of ggplot / htmlwidget / grob objects.
 #' @keywords internal
-build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
-  whitelist, project_name, karyo_bin_size, species) {
-
+build_refinement_plots <- function(
+  original_loop_df, loop_df, bed_info,
+  whitelist, project_name, karyo_bin_size, species
+) {
   red_palette <- c("#FFFFFF", "#FFFFCC", "#FFEDA0", "#FED976", "#FEB24C", "#FD8D3C", "#FC4E2A", "#E31A1C", "#BD0026", "#800026", "#000000")
   purple_palette <- c("#FFFFFF", "#F3E5F5", "#E1BEE7", "#BA68C8", "#9C27B0", "#7B1FA2", "#4A148C", "#000000")
 
@@ -915,51 +972,69 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
     dplyr::arrange(dplyr::desc(n))
   all_types <- type_counts$loop_type
   custom_colors <- grDevices::colorRampPalette(
-    RColorBrewer::brewer.pal(12, "Paired"))(length(all_types))
+    RColorBrewer::brewer.pal(12, "Paired")
+  )(length(all_types))
   names(custom_colors) <- all_types
 
   plot_list <- list()
 
   # Dumbbell comparison
-  df_orig <- original_loop_df %>% dplyr::group_by(loop_type) %>%
+  df_orig <- original_loop_df %>%
+    dplyr::group_by(loop_type) %>%
     dplyr::summarise(Original = dplyr::n(), .groups = "drop")
-  df_filt <- loop_df %>% dplyr::group_by(loop_type) %>%
+  df_filt <- loop_df %>%
+    dplyr::group_by(loop_type) %>%
     dplyr::summarise(Filtered = dplyr::n(), .groups = "drop")
   df_dumbbell <- dplyr::full_join(df_orig, df_filt, by = "loop_type") %>%
-    dplyr::mutate(Original = ifelse(is.na(Original), 0, Original),
+    dplyr::mutate(
+      Original = ifelse(is.na(Original), 0, Original),
       Filtered = ifelse(is.na(Filtered), 0, Filtered),
-      is_e_type = grepl("e", loop_type)) %>%
+      is_e_type = grepl("e", loop_type)
+    ) %>%
     dplyr::arrange(is_e_type, dplyr::desc(Original))
   df_dumbbell$loop_type <- factor(df_dumbbell$loop_type,
-    levels = rev(df_dumbbell$loop_type))
+    levels = rev(df_dumbbell$loop_type)
+  )
   df_long <- df_dumbbell %>%
-    tidyr::pivot_longer(cols = c("Original", "Filtered"),
-      names_to = "Source", values_to = "Count")
+    tidyr::pivot_longer(
+      cols = c("Original", "Filtered"),
+      names_to = "Source", values_to = "Count"
+    )
 
   plot_list$Comparison_Dumbbell <- ggplot2::ggplot() +
-    ggplot2::geom_segment(data = df_dumbbell,
+    ggplot2::geom_segment(
+      data = df_dumbbell,
       ggplot2::aes(y = loop_type, yend = loop_type, x = Original, xend = Filtered),
-      color = "#b2b2b2", linewidth = 0.8) +
-    ggplot2::geom_point(data = df_long,
-      ggplot2::aes(x = Count, y = loop_type, color = Source), size = 3) +
+      color = "#b2b2b2", linewidth = 0.8
+    ) +
+    ggplot2::geom_point(
+      data = df_long,
+      ggplot2::aes(x = Count, y = loop_type, color = Source), size = 3
+    ) +
     ggplot2::scale_color_manual(values = c("Original" = "#999999", "Filtered" = "#E69F00")) +
     ggplot2::theme_minimal() +
-    ggplot2::labs(title = paste0(project_name, ": Filtration Effect (Dumbbell)"),
-      x = "Number of Loops", y = "Loop Type") +
-    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
-      legend.position = "top")
+    ggplot2::labs(
+      title = paste0(project_name, ": Filtration Effect (Dumbbell)"),
+      x = "Number of Loops", y = "Loop Type"
+    ) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"),
+      legend.position = "top"
+    )
 
   # Donut (target-connected loops)
   if (!is.null(bed_info)) {
     gr_bed <- GenomicRanges::makeGRangesFromDataFrame(bed_info,
-      keep.extra.columns = TRUE)
+      keep.extra.columns = TRUE
+    )
     active_anc <- dplyr::bind_rows(
       loop_df %>% dplyr::select(chr = chr1, start = start1, end = end1, cluster_id),
       loop_df %>% dplyr::select(chr = chr2, start = start2, end = end2, cluster_id)
     ) %>% dplyr::distinct()
     if (nrow(active_anc) > 0) {
       gr_anc <- GenomicRanges::makeGRangesFromDataFrame(active_anc,
-        keep.extra.columns = TRUE)
+        keep.extra.columns = TRUE
+      )
       hits <- GenomicRanges::findOverlaps(gr_bed, gr_anc)
       if (length(hits) > 0) {
         hit_ids <- unique(gr_anc$cluster_id[S4Vectors::subjectHits(hits)])
@@ -968,27 +1043,42 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
           donut_data <- tgt_loops %>%
             dplyr::group_by(loop_type) %>%
             dplyr::summarise(count = dplyr::n(), .groups = "drop") %>%
-            dplyr::mutate(fraction = count / sum(count),
-              legend_label = paste0(loop_type, " (n=", count, ", ",
-                round(fraction * 100, 1), "%)"),
-              plot_label = loop_type, is_lower_e = grepl("^e", loop_type)) %>%
+            dplyr::mutate(
+              fraction = count / sum(count),
+              legend_label = paste0(
+                loop_type, " (n=", count, ", ",
+                round(fraction * 100, 1), "%)"
+              ),
+              plot_label = loop_type, is_lower_e = grepl("^e", loop_type)
+            ) %>%
             dplyr::arrange(is_lower_e, dplyr::desc(count)) %>%
             dplyr::mutate(loop_type = factor(loop_type, levels = loop_type))
-          plot_list$Target_Loop_Donut <- ggplot2::ggplot(donut_data,
-            ggplot2::aes(x = 2, y = count, fill = loop_type)) +
+          plot_list$Target_Loop_Donut <- ggplot2::ggplot(
+            donut_data,
+            ggplot2::aes(x = 2, y = count, fill = loop_type)
+          ) +
             ggplot2::geom_bar(stat = "identity", width = 1, color = "white") +
             ggplot2::coord_polar(theta = "y") +
             ggplot2::xlim(0.5, 2.9) +
             ggplot2::geom_text(ggplot2::aes(x = 2.8, label = plot_label),
-              position = ggplot2::position_stack(vjust = 0.5), size = 3) +
-            ggplot2::scale_fill_manual(values = custom_colors,
-              labels = setNames(donut_data$legend_label,
-                as.character(donut_data$loop_type)), name = "Loop Type") +
+              position = ggplot2::position_stack(vjust = 0.5), size = 3
+            ) +
+            ggplot2::scale_fill_manual(
+              values = custom_colors,
+              labels = setNames(
+                donut_data$legend_label,
+                as.character(donut_data$loop_type)
+              ), name = "Loop Type"
+            ) +
             ggplot2::theme_void() +
             ggplot2::labs(title = paste0(project_name, ": Loops Connected to Targets")) +
-            ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5,
-              face = "bold", size = 14), legend.position = "right",
-            legend.text = ggplot2::element_text(size = 10))
+            ggplot2::theme(
+              plot.title = ggplot2::element_text(
+                hjust = 0.5,
+                face = "bold", size = 14
+              ), legend.position = "right",
+              legend.text = ggplot2::element_text(size = 10)
+            )
         }
       }
     }
@@ -1002,16 +1092,24 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
     get_label_mapping <- function(vec) {
       tbl <- table(vec)
       tbl <- tbl[tbl > 0]
-      if (length(tbl) == 0) return(character(0))
-      labels <- paste0(names(tbl), " (n=", tbl, ", ",
-        round(as.numeric(tbl) / total_targets * 100, 1), "%)")
+      if (length(tbl) == 0) {
+        return(character(0))
+      }
+      labels <- paste0(
+        names(tbl), " (n=", tbl, ", ",
+        round(as.numeric(tbl) / total_targets * 100, 1), "%)"
+      )
       names(labels) <- names(tbl)
       return(labels)
     }
     check_status_strict <- function(g_str) {
-      if (is.na(g_str) || g_str == "") return("No Gene Assigned")
+      if (is.na(g_str) || g_str == "") {
+        return("No Gene Assigned")
+      }
       gs <- trimws(unlist(strsplit(as.character(g_str), ";")))
-      if (any(gs %in% whitelist)) return("Active")
+      if (any(gs %in% whitelist)) {
+        return("Active")
+      }
       return("Inactive")
     }
     sankey_data_raw <- raw_bed %>%
@@ -1021,11 +1119,14 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
           grepl("Exon", annotation, ignore.case = TRUE) ~ "Exon",
           grepl("Intron", annotation, ignore.case = TRUE) ~ "Intron",
           grepl("Promoter", annotation, ignore.case = TRUE) ~ "Promoter",
-          TRUE ~ "Others"),
+          TRUE ~ "Others"
+        ),
         L2_Raw = ifelse(!is.na(Linked_Loop_IDs) & Linked_Loop_IDs != "",
-          "Connected", "Unconnected"),
+          "Connected", "Unconnected"
+        ),
         L3_Raw = vapply(SANKEY_RAW_GENES, check_status_strict,
-          FUN.VALUE = character(1))
+          FUN.VALUE = character(1)
+        )
       ) %>%
       dplyr::filter(L3_Raw != "No Gene Assigned")
     if (nrow(sankey_data_raw) > 0) {
@@ -1033,35 +1134,49 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
       l2_map <- get_label_mapping(sankey_data_raw$L2_Raw)
       l3_map <- get_label_mapping(sankey_data_raw$L3_Raw)
       sankey_data_ready <- sankey_data_raw %>%
-        dplyr::mutate(Genomic_Distribution = l1_map[L1_Raw],
+        dplyr::mutate(
+          Genomic_Distribution = l1_map[L1_Raw],
           Loop_Connection = l2_map[L2_Raw],
-          Expression_Status = l3_map[L3_Raw]) %>%
+          Expression_Status = l3_map[L3_Raw]
+        ) %>%
         dplyr::filter(!is.na(Genomic_Distribution) &
           !is.na(Loop_Connection) & !is.na(Expression_Status))
       if (nrow(sankey_data_ready) > 0) {
         links <- dplyr::bind_rows(
-          sankey_data_ready %>% dplyr::group_by(source = Genomic_Distribution,
-            target = Loop_Connection) %>%
+          sankey_data_ready %>% dplyr::group_by(
+            source = Genomic_Distribution,
+            target = Loop_Connection
+          ) %>%
             dplyr::summarise(value = dplyr::n(), .groups = "drop"),
-          sankey_data_ready %>% dplyr::group_by(source = Loop_Connection,
-            target = Expression_Status) %>%
-            dplyr::summarise(value = dplyr::n(), .groups = "drop"))
+          sankey_data_ready %>% dplyr::group_by(
+            source = Loop_Connection,
+            target = Expression_Status
+          ) %>%
+            dplyr::summarise(value = dplyr::n(), .groups = "drop")
+        )
         nodes_vec <- unique(c(links$source, links$target))
         nodes <- data.frame(name = nodes_vec, stringsAsFactors = FALSE)
         links$IDsource <- match(links$source, nodes$name) - 1
         links$IDtarget <- match(links$target, nodes$name) - 1
         sankey_colors <- grDevices::colorRampPalette(
-          RColorBrewer::brewer.pal(12, "Paired"))(length(nodes_vec))
-        colourScale <- sprintf('d3.scaleOrdinal().range(["%s"])',
-          paste(sankey_colors, collapse = '","'))
-        sn <- networkD3::sankeyNetwork(Links = links, Nodes = nodes,
+          RColorBrewer::brewer.pal(12, "Paired")
+        )(length(nodes_vec))
+        colourScale <- sprintf(
+          'd3.scaleOrdinal().range(["%s"])',
+          paste(sankey_colors, collapse = '","')
+        )
+        sn <- networkD3::sankeyNetwork(
+          Links = links, Nodes = nodes,
           Source = "IDsource", Target = "IDtarget", Value = "value",
           NodeID = "name", units = "Targets", fontSize = 14,
           fontFamily = "Arial", nodeWidth = 15, nodePadding = 15,
           iterations = 0, height = 600, width = 900,
-          colourScale = colourScale, sinksRight = FALSE)
-        plot_list$Target_Sankey <- htmlwidgets::onRender(sn,
-          'function(el, x) { var svg = d3.select(el).select("svg"); function createValidID(name) { if (!name) return "unknown"; return name.replace(/[^a-zA-Z0-9-]/g, "_"); } svg.selectAll(".link").each(function(d) { var gradientID = "gradient-" + createValidID(d.source.name) + "-" + createValidID(d.target.name); if (svg.select("#" + gradientID).empty()) { var gradient = svg.append("defs").append("linearGradient").attr("id", gradientID).attr("gradientUnits", "userSpaceOnUse").attr("x1", d.source.x + d.source.dx / 2).attr("y1", d.source.y + d.source.dy / 2).attr("x2", d.target.x + d.target.dx / 2).attr("y2", d.target.y + d.target.dy / 2); var sourceColor = d3.select(el).selectAll(".node").filter(function(node) { return node.name === d.source.name; }).select("rect").style("fill"); var targetColor = d3.select(el).selectAll(".node").filter(function(node) { return node.name === d.target.name; }).select("rect").style("fill"); gradient.append("stop").attr("offset", "0%").attr("stop-color", sourceColor); gradient.append("stop").attr("offset", "100%").attr("stop-color", targetColor); } d3.select(this).style("stroke", "url(#" + gradientID + ")"); }); svg.selectAll(".node rect").style("stroke", "black").style("stroke-width", "1px"); }')
+          colourScale = colourScale, sinksRight = FALSE
+        )
+        plot_list$Target_Sankey <- htmlwidgets::onRender(
+          sn,
+          'function(el, x) { var svg = d3.select(el).select("svg"); function createValidID(name) { if (!name) return "unknown"; return name.replace(/[^a-zA-Z0-9-]/g, "_"); } svg.selectAll(".link").each(function(d) { var gradientID = "gradient-" + createValidID(d.source.name) + "-" + createValidID(d.target.name); if (svg.select("#" + gradientID).empty()) { var gradient = svg.append("defs").append("linearGradient").attr("id", gradientID).attr("gradientUnits", "userSpaceOnUse").attr("x1", d.source.x + d.source.dx / 2).attr("y1", d.source.y + d.source.dy / 2).attr("x2", d.target.x + d.target.dx / 2).attr("y2", d.target.y + d.target.dy / 2); var sourceColor = d3.select(el).selectAll(".node").filter(function(node) { return node.name === d.source.name; }).select("rect").style("fill"); var targetColor = d3.select(el).selectAll(".node").filter(function(node) { return node.name === d.target.name; }).select("rect").style("fill"); gradient.append("stop").attr("offset", "0%").attr("stop-color", sourceColor); gradient.append("stop").attr("offset", "100%").attr("stop-color", targetColor); } d3.select(this).style("stroke", "url(#" + gradientID + ")"); }); svg.selectAll(".node rect").style("stroke", "black").style("stroke-width", "1px"); }'
+        )
       }
     }
   }
@@ -1071,41 +1186,55 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
     "hg38" = "TxDb.Hsapiens.UCSC.hg38.knownGene",
     "hg19" = "TxDb.Hsapiens.UCSC.hg19.knownGene",
     "mm10" = "TxDb.Mmusculus.UCSC.mm10.knownGene",
-    "mm9"  = "TxDb.Mmusculus.UCSC.mm9.knownGene", NULL)
+    "mm9" = "TxDb.Mmusculus.UCSC.mm9.knownGene",
+    NULL
+  )
   org_db <- switch(species,
     "hg38" = "org.Hs.eg.db",
     "hg19" = "org.Hs.eg.db",
     "mm10" = "org.Mm.eg.db",
-    "mm9"  = "org.Mm.eg.db", NULL)
+    "mm9" = "org.Mm.eg.db",
+    NULL
+  )
   if (!is.null(txdb_pkg) && !is.null(org_db) &&
-      requireNamespace(txdb_pkg, quietly = TRUE) &&
-      requireNamespace(org_db, quietly = TRUE)) {
+    requireNamespace(txdb_pkg, quietly = TRUE) &&
+    requireNamespace(org_db, quietly = TRUE)) {
     txdb_obj <- utils::getFromNamespace(txdb_pkg, txdb_pkg)
     all_genes <- GenomicFeatures::genes(txdb_obj)
     org_db_obj <- utils::getFromNamespace(org_db, org_db)
+    valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+    primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+
     map <- AnnotationDbi::select(org_db_obj,
       keys = as.character(all_genes$gene_id),
-      columns = "SYMBOL", keytype = "ENTREZID")
-    all_genes$SYMBOL <- map$SYMBOL[match(all_genes$gene_id, map$ENTREZID)]
-
+      columns = "SYMBOL", keytype = primary_key
+    )
+    all_genes$SYMBOL <- map$SYMBOL[match(all_genes$gene_id, map[[primary_key]])]
     g_active <- clean_gene_names(loop_df$Putative_Target_Genes, ";")
     if (length(g_active) > 0) {
       plot_list$Refined_Karyo_Active <- draw_karyo_heatmap_internal(
         all_genes[all_genes$SYMBOL %in% g_active],
         "Refined Active Genes", karyo_bin_size, 0.99, txdb_obj, species,
-        "Genes", custom_colors = red_palette)
+        "Genes",
+        custom_colors = red_palette
+      )
     }
 
     clean_tgt_col <- if (!is.null(bed_info) &&
-      "Assigned_Target_Genes_Filled" %in% colnames(bed_info))
-      "Assigned_Target_Genes_Filled" else NULL
+      "Assigned_Target_Genes_Filled" %in% colnames(bed_info)) {
+      "Assigned_Target_Genes_Filled"
+    } else {
+      NULL
+    }
     if (!is.null(clean_tgt_col)) {
       g_tgt <- clean_gene_names(bed_info[[clean_tgt_col]], ";")
       if (length(g_tgt) > 0) {
         plot_list$Refined_Karyo_TargetGenes <- draw_karyo_heatmap_internal(
           all_genes[all_genes$SYMBOL %in% g_tgt],
           "Refined Target Genes", karyo_bin_size, 0.99, txdb_obj, species,
-          "Genes", custom_colors = purple_palette)
+          "Genes",
+          custom_colors = purple_palette
+        )
       }
     }
   }
@@ -1114,10 +1243,14 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
   rose_data <- loop_df %>%
     dplyr::group_by(loop_type) %>%
     dplyr::summarise(count = dplyr::n(), .groups = "drop") %>%
-    dplyr::mutate(fraction = count / sum(count),
-      legend_label = paste0(loop_type, " (n=", count, ", ",
-        round(fraction * 100, 1), "%)"),
-      is_lower_e = grepl("^e", loop_type)) %>%
+    dplyr::mutate(
+      fraction = count / sum(count),
+      legend_label = paste0(
+        loop_type, " (n=", count, ", ",
+        round(fraction * 100, 1), "%)"
+      ),
+      is_lower_e = grepl("^e", loop_type)
+    ) %>%
     dplyr::arrange(dplyr::desc(count))
   plot_order <- rose_data$loop_type
   rose_data$loop_type <- factor(rose_data$loop_type, levels = plot_order)
@@ -1125,18 +1258,26 @@ build_refinement_plots <- function(original_loop_df, loop_df, bed_info,
     dplyr::arrange(is_lower_e, dplyr::desc(count)) %>%
     dplyr::pull(loop_type)
 
-  plot_list$Rose <- ggplot2::ggplot(rose_data,
-    ggplot2::aes(x = loop_type, y = count, fill = loop_type)) +
+  plot_list$Rose <- ggplot2::ggplot(
+    rose_data,
+    ggplot2::aes(x = loop_type, y = count, fill = loop_type)
+  ) +
     ggplot2::geom_bar(stat = "identity", width = 1, color = "white") +
     ggplot2::coord_polar(theta = "x") +
-    ggplot2::scale_fill_manual(values = custom_colors,
+    ggplot2::scale_fill_manual(
+      values = custom_colors,
       labels = setNames(rose_data$legend_label, as.character(rose_data$loop_type)),
-      breaks = legend_order, name = "Loop Type") +
+      breaks = legend_order, name = "Loop Type"
+    ) +
     ggplot2::theme_void() +
     ggplot2::labs(title = paste0(project_name, ": Loop Proportion (By Count)")) +
-    ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5,
-      face = "bold", size = 14), legend.position = "right",
-    legend.text = ggplot2::element_text(size = 10))
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(
+        hjust = 0.5,
+        face = "bold", size = 14
+      ), legend.position = "right",
+      legend.text = ggplot2::element_text(size = 10)
+    )
 
   return(plot_list)
 }

@@ -6,8 +6,10 @@ test_that("plot_summary_go_lollipop returns plot list with mock GO results", {
 
   mock_go <- list(
     data.frame(
-      Description = c("immune response", "cell cycle", "DNA repair", "apoptosis",
-        "signal transduction", "metabolism", "transport", "development"),
+      Description = c(
+        "immune response", "cell cycle", "DNA repair", "apoptosis",
+        "signal transduction", "metabolism", "transport", "development"
+      ),
       pvalue = c(1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 0.01, 0.05),
       Count = c(50, 40, 30, 25, 20, 15, 10, 5),
       ONTOLOGY = rep(c("BP", "MF"), 4),
@@ -26,9 +28,12 @@ test_that("plot_summary_go_lollipop returns plot list with mock GO results", {
 test_that("plot_summary_go_lollipop handles empty and NULL inputs", {
   expect_type(looplook:::plot_summary_go_lollipop(list(), "Empty"), "list")
   expect_type(looplook:::plot_summary_go_lollipop(
-    list(data.frame(Description = character(0), pvalue = numeric(0),
+    list(data.frame(
+      Description = character(0), pvalue = numeric(0),
       Count = integer(0), ONTOLOGY = character(0), CleanLoopType = character(0),
-      stringsAsFactors = FALSE)), "NoRows"), "list")
+      stringsAsFactors = FALSE
+    )), "NoRows"
+  ), "list")
 })
 
 test_that("compute_refined_stats handles NULL upstream stats", {
@@ -51,7 +56,8 @@ test_that("compute_refined_stats handles NULL upstream stats", {
 
   res <- looplook:::compute_refined_stats(mock_loop,
     upstream_promoter_stats = NULL, upstream_distal_stats = NULL,
-    vals = vals, threshold = 1, hub_percentile = 0.95)
+    vals = vals, threshold = 1, hub_percentile = 0.95
+  )
 
   expect_type(res, "list")
   expect_true("promoter_centric" %in% names(res))
@@ -84,7 +90,8 @@ test_that("compute_refined_stats handles upstream stats merge", {
   vals <- c(TP53 = 8, BRCA1 = 3, MYC = 5, EGFR = 2)
   res <- looplook:::compute_refined_stats(mock_loop,
     upstream_promoter_stats = upstream_prom, upstream_distal_stats = NULL,
-    vals = vals, threshold = 1, hub_percentile = 0.95)
+    vals = vals, threshold = 1, hub_percentile = 0.95
+  )
 
   expect_false(is.null(res$promoter_centric))
   expect_true("Is_Active_Gene" %in% colnames(res$promoter_centric))
@@ -106,7 +113,7 @@ test_that("run_lfc_violin handles t.test and edge cases", {
 
   # invalid stat test
   p_inv <- looplook:::run_lfc_violin(targets, global_glist, "invalid", "Bad")
-  expect_s3_class(p_inv, "ggplot")  # uses t.test as default
+  expect_s3_class(p_inv, "ggplot") # uses t.test as default
 })
 
 test_that("build_refinement_plots returns expected plot names", {
@@ -130,7 +137,8 @@ test_that("build_refinement_plots returns expected plot names", {
 
   plots <- looplook:::build_refinement_plots(mock_orig, mock_loop,
     bed_info = NULL, whitelist = c("TP53", "BRCA1"),
-    project_name = "Test", karyo_bin_size = 1e6, species = "hg38")
+    project_name = "Test", karyo_bin_size = 1e6, species = "hg38"
+  )
 
   expect_type(plots, "list")
   expect_true("Comparison_Dumbbell" %in% names(plots))
@@ -173,7 +181,8 @@ test_that("build_annotation_plots returns core plot names", {
     cluster_info = mock_cluster, target_connected_loops = mock_tgt,
     txdb_obj = txdb, org_db_pkg = "org.Hs.eg.db",
     species = "hg38", project_name = "TestAnno",
-    color_palette = "Set2", karyo_bin_size = 1e7)
+    color_palette = "Set2", karyo_bin_size = 1e7
+  )
 
   expect_type(plots, "list")
   expect_true("Basic_Donut" %in% names(plots))

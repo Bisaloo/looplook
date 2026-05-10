@@ -54,10 +54,10 @@
 #' res <- tmp[[ls(tmp)[1]]]
 #' profile_target_genes(
 #'   annotation_res = res,
-#'   diff_file  = diff_path,
+#'   diff_file = diff_path,
 #'   expr_matrix_file = expr_path,
 #'   metadata_file = meta_path,
-#'   run_go  = FALSE,
+#'   run_go = FALSE,
 #'   run_ppi = FALSE
 #' )
 #' }
@@ -109,7 +109,13 @@ profile_target_genes <- function(
   }
 
   if (run_motif) {
-    bs_pkg <- switch(genome_id, "hg19" = "BSgenome.Hsapiens.UCSC.hg19", "hg38" = "BSgenome.Hsapiens.UCSC.hg38", "mm9" = "BSgenome.Mmusculus.UCSC.mm9", "mm10" = "BSgenome.Mmusculus.UCSC.mm10", NULL)
+    bs_pkg <- switch(genome_id,
+      "hg19" = "BSgenome.Hsapiens.UCSC.hg19",
+      "hg38" = "BSgenome.Hsapiens.UCSC.hg38",
+      "mm9" = "BSgenome.Mmusculus.UCSC.mm9",
+      "mm10" = "BSgenome.Mmusculus.UCSC.mm10",
+      NULL
+    )
     if (is.null(bs_pkg) || !requireNamespace(bs_pkg, quietly = TRUE)) {
       warning("Unsupported genome or missing BSgenome package. Disabling Motif Analysis.")
       run_motif <- FALSE
@@ -193,7 +199,8 @@ profile_target_genes <- function(
       heat_plots <- safe_step("Expression/connectivity plots", {
         run_heatmap_and_connectivity(target_genes, tpm_mat_raw, meta_raw, loop_stats_df,
           global_glist, heatmap_nSample, cor_method, current_proj_name,
-          source_type = src, target_col = NULL)
+          source_type = src, target_col = NULL
+        )
       })
       if (length(heat_plots) > 0) task_plots <- c(task_plots, heat_plots)
 
@@ -202,7 +209,8 @@ profile_target_genes <- function(
         dist_plots <- safe_step("Distal connectivity plots", {
           run_heatmap_and_connectivity(target_genes, tpm_mat_raw, meta_raw, loop_stats_df,
             global_glist, heatmap_nSample, cor_method, current_proj_name,
-            source_type = src, target_col = "n_Linked_Distal", skip_heatmap = TRUE)
+            source_type = src, target_col = "n_Linked_Distal", skip_heatmap = TRUE
+          )
         })
         if (length(dist_plots) > 0) task_plots <- c(task_plots, dist_plots)
       }
@@ -210,8 +218,10 @@ profile_target_genes <- function(
       # 3.4 Motif Analysis
       if (run_motif) {
         motif_plots <- safe_step("Motif analysis", {
-          run_distal_motif_analysis(target_genes, annotation_res$loop_annotation,
-            genome_id, motif_p_thresh, current_proj_name, motif_ntop)
+          run_distal_motif_analysis(
+            target_genes, annotation_res$loop_annotation,
+            genome_id, motif_p_thresh, current_proj_name, motif_ntop
+          )
         })
         if (length(motif_plots) > 0) task_plots <- c(task_plots, motif_plots)
       }
@@ -219,12 +229,18 @@ profile_target_genes <- function(
       # 3.5 GO
       if (run_go) {
         go_out <- safe_step("GO enrichment", {
-          run_go_enrichment(target_genes, org_db, global_glist, cnet_nSample,
-            current_proj_name)
+          run_go_enrichment(
+            target_genes, org_db, global_glist, cnet_nSample,
+            current_proj_name
+          )
         })
         if (!is.null(go_out$result) && nrow(go_out$result) > 0) {
           top_go <- if ("ONTOLOGY" %in% colnames(go_out$result)) {
-            go_out$result %>% dplyr::group_by(ONTOLOGY) %>% dplyr::arrange(pvalue) %>% dplyr::slice_head(n = 5) %>% dplyr::ungroup()
+            go_out$result %>%
+              dplyr::group_by(ONTOLOGY) %>%
+              dplyr::arrange(pvalue) %>%
+              dplyr::slice_head(n = 5) %>%
+              dplyr::ungroup()
           } else {
             head(go_out$result[order(go_out$result$pvalue), ], 15)
           }
@@ -239,8 +255,10 @@ profile_target_genes <- function(
       # 3.6 PPI
       if (run_ppi) {
         p_ppi <- safe_step("PPI network", {
-          run_ppi_analysis(target_genes, global_glist, org_db, ppi_score,
-            ppi_nSample, current_proj_name)
+          run_ppi_analysis(
+            target_genes, global_glist, org_db, ppi_score,
+            ppi_nSample, current_proj_name
+          )
         })
         if (!is.null(p_ppi)) task_plots$PPI_Network <- p_ppi
       }
@@ -254,9 +272,11 @@ profile_target_genes <- function(
       })
       if (length(p_go_sum) > 0) source_plots$Summary_GO <- p_go_sum
     }
-    final_master_list[[src]] <- list(go_results = source_go_results,
+    final_master_list[[src]] <- list(
+      go_results = source_go_results,
       target_gene_sets = analysis_queue, plots = source_plots,
-      warnings = unique(warn_env$w))
+      warnings = unique(warn_env$w)
+    )
   }
   message("\n All analysis complete.")
   return(invisible(final_master_list))
@@ -300,14 +320,18 @@ extract_target_gene_sets <- function(annotation_res, src, active_loop_types = NU
     bed_info <- annotation_res$target_annotation
     target_col <- NULL
     if (use_nearest_gene) {
-      if ("SYMBOL" %in% colnames(bed_info)) target_col <- "SYMBOL"
-      else if ("geneId" %in% colnames(bed_info)) target_col <- "geneId"
+      if ("SYMBOL" %in% colnames(bed_info)) {
+        target_col <- "SYMBOL"
+      } else if ("geneId" %in% colnames(bed_info)) target_col <- "geneId"
       if (is.null(target_col)) stop("Targets: 'SYMBOL' or 'geneId' required when use_nearest_gene is TRUE.")
     } else {
       base_col <- if (target_mapping_mode == "promoter") "Regulated_promoter_genes" else "Assigned_Target_Genes"
       desired_col <- if (include_Filled) paste0(base_col, "_Filled") else base_col
-      if (desired_col %in% colnames(bed_info)) target_col <- desired_col
-      else stop("Targets: Required column '", desired_col, "' not found.")
+      if (desired_col %in% colnames(bed_info)) {
+        target_col <- desired_col
+      } else {
+        stop("Targets: Required column '", desired_col, "' not found.")
+      }
     }
     if (!is.null(target_col)) {
       gs <- clean_gene_names(bed_info[[target_col]], "[;,]")
@@ -341,7 +365,9 @@ extract_target_gene_sets <- function(annotation_res, src, active_loop_types = NU
 #' @keywords internal
 run_lfc_violin <- function(target_genes, global_glist, stat_test = "wilcox.test", project_name) {
   valid_targets <- intersect(target_genes, names(global_glist))
-  if (length(valid_targets) < 3) return(NULL)
+  if (length(valid_targets) < 3) {
+    return(NULL)
+  }
 
   target_lfc <- global_glist[valid_targets]
   other_genes <- setdiff(names(global_glist), valid_targets)
@@ -392,7 +418,9 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
   curr_targets <- toupper(target_genes)
 
   if (!is.null(gsea_ntop) && length(curr_targets) > gsea_ntop) curr_targets <- sample(curr_targets, gsea_ntop)
-  if (length(intersect(curr_targets, names(curr_glist))) < 2) return(list(result = NULL, plot = NULL))
+  if (length(intersect(curr_targets, names(curr_glist))) < 2) {
+    return(list(result = NULL, plot = NULL))
+  }
 
   term_df <- data.frame(term = current_proj_name, gene = curr_targets, stringsAsFactors = FALSE)
   gsea_res <- clusterProfiler::GSEA(curr_glist, TERM2GENE = term_df, pvalueCutoff = 1.1, minGSSize = 2, maxGSSize = 50000, verbose = FALSE, seed = TRUE)
@@ -401,11 +429,14 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
   if (!is.null(gsea_res) && nrow(as.data.frame(gsea_res)) > 0) {
     p_temp <- enrichplot::gseaplot2(gsea_res, geneSetID = 1, subplots = 1)
     d <- NULL
-    if (inherits(p_temp, "ggplot")) d <- p_temp$data
-    else if (inherits(p_temp, "aplot") || inherits(p_temp, "gglist") || is.list(p_temp)) {
-      for (sub_p in p_temp) if (inherits(sub_p, "ggplot") && !is.null(sub_p$data) && "runningScore" %in% colnames(sub_p$data)) {
-        d <- sub_p$data
-        break
+    if (inherits(p_temp, "ggplot")) {
+      d <- p_temp$data
+    } else if (inherits(p_temp, "aplot") || inherits(p_temp, "gglist") || is.list(p_temp)) {
+      for (sub_p in p_temp) {
+        if (inherits(sub_p, "ggplot") && !is.null(sub_p$data) && "runningScore" %in% colnames(sub_p$data)) {
+          d <- sub_p$data
+          break
+        }
       }
     } else if (!is.null(p_temp$data)) d <- p_temp$data
 
@@ -443,8 +474,11 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
         ggplot2::labs(x = "Rank", y = "LFC") +
         ggplot2::theme(legend.position = "none", axis.text.y = ggplot2::element_text(size = 8))
 
-      if (requireNamespace("aplot", quietly = TRUE)) p_out <- aplot::plot_list(p1, p2, p3, ncol = 1, heights = c(2, 0.5, 1.5))
-      else p_out <- enrichplot::gseaplot2(gsea_res, geneSetID = 1, title = as.data.frame(gsea_res)$Description[1])
+      if (requireNamespace("aplot", quietly = TRUE)) {
+        p_out <- aplot::plot_list(p1, p2, p3, ncol = 1, heights = c(2, 0.5, 1.5))
+      } else {
+        p_out <- enrichplot::gseaplot2(gsea_res, geneSetID = 1, title = as.data.frame(gsea_res)$Description[1])
+      }
     }
   }
   return(list(result = as.data.frame(gsea_res), plot = p_out))
@@ -457,18 +491,21 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
 run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, project_name = "Analysis") {
   clean_genes <- clean_gene_names(genes)
   org_db_obj <- utils::getFromNamespace(org_db, org_db)
+  valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+  primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+  symbol_key <- if ("SYMBOL" %in% valid_keys) "SYMBOL" else valid_keys[1]
 
-  gene_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = clean_genes, column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
+  gene_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = clean_genes, column = primary_key, keytype = symbol_key, multiVals = "first")
   valid_entrez <- na.omit(gene_entrez)
 
   use_symbol_mode <- length(valid_entrez) < 5 || (length(valid_entrez) / length(clean_genes) < 0.1)
 
   if (use_symbol_mode) {
     final_genes <- clean_genes
-    final_keytype <- "SYMBOL"
+    final_keytype <- symbol_key
   } else {
     final_genes <- valid_entrez
-    final_keytype <- "ENTREZID"
+    final_keytype <- primary_key
   }
 
   final_universe <- NULL
@@ -476,14 +513,15 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
     if (use_symbol_mode) {
       final_universe <- names(universe_genes)
     } else {
-      univ_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = names(universe_genes), column = "ENTREZID", keytype = "SYMBOL", multiVals = "first")
+      univ_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = names(universe_genes), column = primary_key, keytype = symbol_key, multiVals = "first")
       final_universe <- na.omit(univ_entrez)
     }
   }
 
-  ego <- clusterProfiler::enrichGO(gene = final_genes, universe = final_universe, OrgDb = org_db_obj, keyType = final_keytype, ont = "ALL", pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 1.0, minGSSize = 5, maxGSSize = 800, readable = (final_keytype == "ENTREZID"))
-
-  if (is.null(ego) || nrow(as.data.frame(ego)) == 0) return(list(result = NULL, plot = NULL))
+  ego <- clusterProfiler::enrichGO(gene = final_genes, universe = final_universe, OrgDb = org_db_obj, keyType = final_keytype, ont = "ALL", pAdjustMethod = "BH", pvalueCutoff = 0.05, qvalueCutoff = 1.0, minGSSize = 5, maxGSSize = 800, readable = (final_keytype == primary_key))
+  if (is.null(ego) || nrow(as.data.frame(ego)) == 0) {
+    return(list(result = NULL, plot = NULL))
+  }
 
   p_cnet <- NULL
   top_n <- if (!is.null(cnet_nSample)) {
@@ -541,22 +579,31 @@ run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_
   ppi_genes <- target_genes
   if (!is.null(ppi_ntop) && length(ppi_genes) > ppi_ntop) {
     valid_in_lfc <- intersect(ppi_genes, names(global_glist))
-    if (length(valid_in_lfc) > 0) ppi_genes <- head(valid_in_lfc[order(abs(global_glist[valid_in_lfc]), decreasing = TRUE)], ppi_ntop)
-    else ppi_genes <- head(ppi_genes, ppi_ntop)
+    if (length(valid_in_lfc) > 0) {
+      ppi_genes <- head(valid_in_lfc[order(abs(global_glist[valid_in_lfc]), decreasing = TRUE)], ppi_ntop)
+    } else {
+      ppi_genes <- head(ppi_genes, ppi_ntop)
+    }
   }
 
   # Capture STRINGdb mapping output to prevent raw text in the report
   map_output <- capture.output(
     targets_mapped <- string_db_obj$map(data.frame(gene = ppi_genes), "gene", removeUnmappedRows = TRUE)
   )
-  if (nrow(targets_mapped) == 0) return(NULL)
+  if (nrow(targets_mapped) == 0) {
+    return(NULL)
+  }
 
   hits <- targets_mapped$STRING_id
-  if (length(hits) <= 1) return(NULL)
+  if (length(hits) <= 1) {
+    return(NULL)
+  }
 
   g_string <- string_db_obj$get_subnetwork(hits)
   g_string <- igraph::delete_vertices(g_string, igraph::V(g_string)[igraph::degree(g_string) == 0])
-  if (igraph::vcount(g_string) == 0) return(NULL)
+  if (igraph::vcount(g_string) == 0) {
+    return(NULL)
+  }
 
   map_df <- targets_mapped[targets_mapped$STRING_id %in% igraph::V(g_string)$name, ]
   symbol_map <- setNames(map_df$gene, map_df$STRING_id)
@@ -596,10 +643,14 @@ run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_
 plot_summary_go_lollipop <- function(all_go_results, base_project_name) {
   plot_list <- list()
   valid_results <- Filter(function(x) !is.null(x) && is.data.frame(x) && nrow(x) > 0, all_go_results)
-  if (length(valid_results) == 0) return(plot_list)
+  if (length(valid_results) == 0) {
+    return(plot_list)
+  }
 
   final_go_df <- do.call(rbind, valid_results)
-  if (is.null(final_go_df)) return(plot_list)
+  if (is.null(final_go_df)) {
+    return(plot_list)
+  }
 
   if (!"CleanLoopType" %in% colnames(final_go_df)) final_go_df$CleanLoopType <- final_go_df$LoopType
   use_ggtext <- requireNamespace("ggtext", quietly = TRUE)
@@ -621,8 +672,11 @@ plot_summary_go_lollipop <- function(all_go_results, base_project_name) {
     sub_df$ONTOLOGY <- factor(sub_df$ONTOLOGY, levels = onto_levels)
     onto_colors <- RColorBrewer::brewer.pal(max(3, length(onto_levels)), "Dark2")[seq_len(length(onto_levels))]
 
-    if (use_ggtext) sub_df$ONTOLOGY_Plot <- factor(sub_df$ONTOLOGY, levels = onto_levels, labels = paste0("<span style='color:", onto_colors, "'>", onto_levels, "</span>"))
-    else sub_df$ONTOLOGY_Plot <- sub_df$ONTOLOGY
+    if (use_ggtext) {
+      sub_df$ONTOLOGY_Plot <- factor(sub_df$ONTOLOGY, levels = onto_levels, labels = paste0("<span style='color:", onto_colors, "'>", onto_levels, "</span>"))
+    } else {
+      sub_df$ONTOLOGY_Plot <- sub_df$ONTOLOGY
+    }
 
     p_go <- ggplot2::ggplot(sub_df, ggplot2::aes(y = Description_unique)) +
       ggplot2::geom_segment(ggplot2::aes(x = 0, xend = logP, yend = Description_unique, color = ONTOLOGY), linewidth = 3) +
@@ -636,8 +690,11 @@ plot_summary_go_lollipop <- function(all_go_results, base_project_name) {
       ggplot2::theme(axis.text.y = ggplot2::element_text(size = 10, color = "black"), strip.placement = "outside", strip.background = ggplot2::element_blank(), panel.grid.major.y = ggplot2::element_line(color = "grey95", linetype = "dashed"), legend.position = "none") +
       ggplot2::scale_color_brewer(palette = "Dark2")
 
-    if (use_ggtext) p_go <- p_go + ggplot2::theme(strip.text.y.left = ggtext::element_markdown(angle = 0, face = "bold", size = 12))
-    else p_go <- p_go + ggplot2::theme(strip.text.y.left = ggplot2::element_text(angle = 0, face = "bold", size = 12, color = onto_colors))
+    if (use_ggtext) {
+      p_go <- p_go + ggplot2::theme(strip.text.y.left = ggtext::element_markdown(angle = 0, face = "bold", size = 12))
+    } else {
+      p_go <- p_go + ggplot2::theme(strip.text.y.left = ggplot2::element_text(angle = 0, face = "bold", size = 12, color = onto_colors))
+    }
 
     plot_list[[ltype]] <- p_go
   }
@@ -651,7 +708,9 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
   plots_list <- list()
   colnames(tpm_mat_raw) <- trimws(colnames(tpm_mat_raw))
   valid_s <- intersect(meta_raw$SampleID, colnames(tpm_mat_raw))
-  if (length(valid_s) == 0) return(plots_list)
+  if (length(valid_s) == 0) {
+    return(plots_list)
+  }
 
   curr_mat <- tpm_mat_raw[, valid_s, drop = FALSE]
   curr_meta <- meta_raw %>% dplyr::filter(SampleID %in% valid_s)
@@ -678,7 +737,9 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
     }
   }
 
-  if (is.null(loop_stats_df)) return(plots_list)
+  if (is.null(loop_stats_df)) {
+    return(plots_list)
+  }
   use_col <- NULL
   display_tag <- "Total Loops"
 
@@ -686,18 +747,26 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
     if (target_col %in% colnames(loop_stats_df)) {
       use_col <- target_col
       display_tag <- target_col
-    } else return(plots_list)
+    } else {
+      return(plots_list)
+    }
   } else {
-    if ("Total_Loops" %in% colnames(loop_stats_df)) use_col <- "Total_Loops"
-    else if ("Loop_Degree" %in% colnames(loop_stats_df)) use_col <- "Loop_Degree"
-    else if ("degree" %in% colnames(loop_stats_df)) use_col <- "degree"
+    if ("Total_Loops" %in% colnames(loop_stats_df)) {
+      use_col <- "Total_Loops"
+    } else if ("Loop_Degree" %in% colnames(loop_stats_df)) {
+      use_col <- "Loop_Degree"
+    } else if ("degree" %in% colnames(loop_stats_df)) use_col <- "degree"
   }
 
-  if (is.null(use_col)) return(plots_list)
+  if (is.null(use_col)) {
+    return(plots_list)
+  }
 
   gene_col_name <- colnames(loop_stats_df)[1]
   valid_targets <- intersect(target_genes, loop_stats_df[[gene_col_name]])
-  if (length(valid_targets) < 5) return(plots_list)
+  if (length(valid_targets) < 5) {
+    return(plots_list)
+  }
 
   cols_to_extract <- unique(c(gene_col_name, use_col, intersect(colnames(loop_stats_df), c("Is_High_Connectivity_Gene", "Is_High_Distal_Connectivity_Gene", "High_Connectivity_Gene"))))
   stats_subset <- loop_stats_df[loop_stats_df[[gene_col_name]] %in% valid_targets, cols_to_extract]
@@ -705,14 +774,18 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
   colnames(stats_subset)[1] <- "Gene"
 
   valid_expr_targets <- intersect(stats_subset$Gene, rownames(curr_mat))
-  if (length(valid_expr_targets) < 5) return(plots_list)
+  if (length(valid_expr_targets) < 5) {
+    return(plots_list)
+  }
 
   stats_subset <- stats_subset[stats_subset$Gene %in% valid_expr_targets, ]
   plot_df <- stats_subset %>%
     dplyr::mutate(Expression = as.numeric(log2(rowMeans(curr_mat[stats_subset$Gene, , drop = FALSE], na.rm = TRUE) + 1)), LFC = as.numeric(global_glist[stats_subset$Gene]), Log10Degree = log10(Degree)) %>%
     dplyr::filter(!is.na(Expression), !is.na(LFC), Degree >= 1)
 
-  if (nrow(plot_df) < 5) return(plots_list)
+  if (nrow(plot_df) < 5) {
+    return(plots_list)
+  }
 
   full_title_suffix <- paste0(if (source_type == "loops") "Looped (Specified Types)" else "Looped Targets", " | ", display_tag)
 
@@ -742,7 +815,9 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
     custom_colors <- c("High Total" = "#ECB884", "Others" = "#82969D")
   }
 
-  plot_df_rc <- plot_df_rc %>% dplyr::filter(!is.na(Conn_Group)) %>% droplevels()
+  plot_df_rc <- plot_df_rc %>%
+    dplyr::filter(!is.na(Conn_Group)) %>%
+    droplevels()
 
   if (nlevels(plot_df_rc$Conn_Group) > 1) {
     clean_theme <- ggplot2::theme_classic() + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14), plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 11, color = "black"), legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1, size = 10, color = "black"), axis.text.y = ggplot2::element_text(size = 10, color = "black"), axis.title.y = ggplot2::element_text(size = 12, face = "bold"), axis.line = ggplot2::element_line(color = "black", linewidth = 0.6), axis.ticks = ggplot2::element_line(color = "black"), panel.grid = ggplot2::element_blank())
@@ -756,8 +831,10 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
         ggdist::stat_slab(ggplot2::aes_string(x = "as.numeric(Conn_Group) + 0.07", y = y_var, color = "Conn_Group"), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
         ggplot2::scale_x_continuous(breaks = seq_along(levels(plot_df_rc$Conn_Group)), labels = levels(plot_df_rc$Conn_Group)) +
         ggplot2::coord_cartesian(xlim = c(0.75, length(levels(plot_df_rc$Conn_Group)) + 0.6)) +
-        ggplot2::scale_fill_manual(values = custom_colors) + ggplot2::scale_color_manual(values = custom_colors) +
-        ggplot2::labs(title = "Regulation: High_connectivity vs Others", x = NULL, y = y_lab) + clean_theme
+        ggplot2::scale_fill_manual(values = custom_colors) +
+        ggplot2::scale_color_manual(values = custom_colors) +
+        ggplot2::labs(title = "Regulation: High_connectivity vs Others", x = NULL, y = y_lab) +
+        clean_theme
     }
     plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") + ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey45", linewidth = 0.6)
     plots_list$Raincloud_Expr <- base_box("Expression", "Log2(Mean Expression + 1)")
@@ -775,25 +852,38 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 #' @param jaspar_collection Character. JASPAR collection to query (e.g., \code{"CORE"}, \code{"CNE"}). Default: \code{"CORE"}.
 #' @return A named list containing motif enrichment results and plot objects.
 #' @keywords internal
-run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thresh,
+run_distal_motif_analysis <- function(
+  target_genes, loop_df, genome_id, pval_thresh,
   current_proj_name, top_n = 5, jaspar_db = JASPAR2020::JASPAR2020,
-  jaspar_collection = "CORE") {
-  bs_pkg <- switch(genome_id, "hg19" = "BSgenome.Hsapiens.UCSC.hg19", "hg38" = "BSgenome.Hsapiens.UCSC.hg38", "mm9" = "BSgenome.Mmusculus.UCSC.mm9", "mm10" = "BSgenome.Mmusculus.UCSC.mm10")
+  jaspar_collection = "CORE"
+) {
+  bs_pkg <- switch(genome_id,
+    "hg19" = "BSgenome.Hsapiens.UCSC.hg19",
+    "hg38" = "BSgenome.Hsapiens.UCSC.hg38",
+    "mm9" = "BSgenome.Mmusculus.UCSC.mm9",
+    "mm10" = "BSgenome.Mmusculus.UCSC.mm10"
+  )
   species_id <- if (grepl("mm", genome_id)) 10090 else 9606
   genome_obj <- get0(bs_pkg, envir = asNamespace(bs_pkg))
   if (!is.data.frame(loop_df)) loop_df <- as.data.frame(loop_df)
 
   col_g1 <- intersect(c("anchor1_gene", "Anchor1_Gene", "gene_name_1", "Gene_Name_1", "Symbol_1", "nearest_gene_1", "gene1"), colnames(loop_df))[1]
   col_g2 <- intersect(c("anchor2_gene", "Anchor2_Gene", "gene_name_2", "Gene_Name_2", "Symbol_2", "nearest_gene_2", "gene2"), colnames(loop_df))[1]
-  if (is.na(col_g1) || is.na(col_g2)) return(list())
+  if (is.na(col_g1) || is.na(col_g2)) {
+    return(list())
+  }
 
   target_genes <- clean_gene_names(target_genes)
   a1_hits <- vapply(loop_df[[col_g1]], .anchor_matches_targets,
-    target_genes = target_genes, FUN.VALUE = logical(1))
+    target_genes = target_genes, FUN.VALUE = logical(1)
+  )
   a2_hits <- vapply(loop_df[[col_g2]], .anchor_matches_targets,
-    target_genes = target_genes, FUN.VALUE = logical(1))
+    target_genes = target_genes, FUN.VALUE = logical(1)
+  )
   target_indices <- which(a1_hits | a2_hits)
-  if (length(target_indices) < 5) return(list())
+  if (length(target_indices) < 5) {
+    return(list())
+  }
 
   target_loops <- loop_df[target_indices, ]
   target_a1_hits <- a1_hits[target_indices]
@@ -819,15 +909,19 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
   bg_gr <- c(GenomicRanges::GRanges(seqnames = bg_loops$chr1, ranges = IRanges::IRanges(start = bg_loops$start1, end = bg_loops$end1)), GenomicRanges::GRanges(seqnames = bg_loops$chr2, ranges = IRanges::IRanges(start = bg_loops$start2, end = bg_loops$end2)))
 
   plots_list <- list()
-  enrich_prox <- .calc_motif_enrichment(do.call(c, proximal_gr_list), bg_gr,
-    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection)
+  enrich_prox <- .calc_motif_enrichment(
+    do.call(c, proximal_gr_list), bg_gr,
+    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
+  )
   res_prox <- .annotate_motif_families(enrich_prox, jaspar_db, jaspar_collection)
   plots_list$Proximal_Motif_Bar <- .plot_save_motif(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
   plots_list$Proximal_Motif_Logos <- .plot_top_motif_logos(res_prox, top_n, jaspar_db)
   plots_list$Proximal_Motif_Rank <- .plot_motif_rank_scatter(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
 
-  enrich_dist <- .calc_motif_enrichment(do.call(c, distal_gr_list), bg_gr,
-    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection)
+  enrich_dist <- .calc_motif_enrichment(
+    do.call(c, distal_gr_list), bg_gr,
+    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
+  )
   res_dist <- .annotate_motif_families(enrich_dist, jaspar_db, jaspar_collection)
   plots_list$Distal_Motif_Bar <- .plot_save_motif(res_dist, paste0(current_proj_name, "_Motif_Distal"))
   plots_list$Distal_Motif_Logos <- .plot_top_motif_logos(res_dist, top_n, jaspar_db)
@@ -840,7 +934,9 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
 #' @return A \code{ggplot} object, or \code{NULL} if input is empty.
 #' @keywords internal
 .plot_motif_rank_scatter <- function(res_df, prefix, fdr_thresh = 0.05) {
-  if (is.null(res_df) || nrow(res_df) == 0) return(NULL)
+  if (is.null(res_df) || nrow(res_df) == 0) {
+    return(NULL)
+  }
   if (!"Family" %in% colnames(res_df)) res_df$Family <- "Unknown"
 
   plot_df <- res_df %>%
@@ -848,8 +944,9 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
     dplyr::arrange(dplyr::desc(LogFDR)) %>%
     dplyr::mutate(Rank = dplyr::row_number())
 
-  if (sum(plot_df$Is_Sig, na.rm = TRUE) == 0) plot_df$PlotFamily <- "Not Significant"
-  else {
+  if (sum(plot_df$Is_Sig, na.rm = TRUE) == 0) {
+    plot_df$PlotFamily <- "Not Significant"
+  } else {
     fam_counts <- table(plot_df$Family[plot_df$Is_Sig & !plot_df$Family %in% c("Unknown", "", NA)])
     plot_df$PlotFamily <- ifelse(plot_df$Is_Sig, ifelse(plot_df$Family %in% names(sort(fam_counts, decreasing = TRUE))[seq_len(min(10, length(fam_counts)))], plot_df$Family, "Others"), "Not Significant")
   }
@@ -859,23 +956,36 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
   color_map["Others"] <- "black"
   color_map["Not Significant"] <- "grey85"
 
-  return(ggplot2::ggplot(plot_df, ggplot2::aes(x = Rank, y = LogFDR, size = OddsRatio, color = PlotFamily)) + ggplot2::geom_point(alpha = 0.8) + ggplot2::scale_color_manual(values = color_map, name = "TF Family (Top 10)") + ggplot2::scale_radius(name = "Odds Ratio", range = c(1, 7), breaks = c(0.8, 1.0, 1.2, 1.4, 1.6)) + ggplot2::geom_hline(yintercept = -log10(fdr_thresh), linetype = "dashed", color = "black", alpha = 0.5) + ggplot2::labs(title = paste0("Motif Enrichment Rank: ", basename(prefix)), x = "Rank", y = "-log10(FDR)") + ggplot2::theme_classic() + ggplot2::theme(legend.position = "right", legend.text = ggplot2::element_text(size = 8), legend.title = ggplot2::element_text(size = 9, face = "bold")))
+  return(ggplot2::ggplot(plot_df, ggplot2::aes(x = Rank, y = LogFDR, size = OddsRatio, color = PlotFamily)) +
+    ggplot2::geom_point(alpha = 0.8) +
+    ggplot2::scale_color_manual(values = color_map, name = "TF Family (Top 10)") +
+    ggplot2::scale_radius(name = "Odds Ratio", range = c(1, 7), breaks = c(0.8, 1.0, 1.2, 1.4, 1.6)) +
+    ggplot2::geom_hline(yintercept = -log10(fdr_thresh), linetype = "dashed", color = "black", alpha = 0.5) +
+    ggplot2::labs(title = paste0("Motif Enrichment Rank: ", basename(prefix)), x = "Rank", y = "-log10(FDR)") +
+    ggplot2::theme_classic() +
+    ggplot2::theme(legend.position = "right", legend.text = ggplot2::element_text(size = 8), legend.title = ggplot2::element_text(size = 9, face = "bold")))
 }
 
 #' @title Calculate Motif Enrichment via Fisher's Exact Test
 #' @return A data frame of enrichment results, or \code{NULL} if input is empty.
 #' @keywords internal
-.calc_motif_enrichment <- function(fg_gr, bg_gr, genome_obj, pval_thresh, species_id,
-  jaspar_db = JASPAR2020::JASPAR2020, jaspar_collection = "CORE") {
+.calc_motif_enrichment <- function(
+  fg_gr, bg_gr, genome_obj, pval_thresh, species_id,
+  jaspar_db = JASPAR2020::JASPAR2020, jaspar_collection = "CORE"
+) {
   fg_gr <- GenomicRanges::resize(fg_gr[GenomicRanges::start(fg_gr) > 0], width = 500, fix = "center")
   bg_gr <- GenomicRanges::resize(bg_gr[GenomicRanges::start(bg_gr) > 0], width = 500, fix = "center")
-  if (length(fg_gr) == 0 || length(bg_gr) == 0) return(NULL)
+  if (length(fg_gr) == 0 || length(bg_gr) == 0) {
+    return(NULL)
+  }
 
   fg_seq <- BSgenome::getSeq(genome_obj, fg_gr)
   bg_seq <- BSgenome::getSeq(genome_obj, bg_gr)
   pfm_list <- TFBSTools::getMatrixSet(jaspar_db, list(species = species_id, collection = jaspar_collection))
   if (length(pfm_list) == 0) pfm_list <- TFBSTools::getMatrixSet(jaspar_db, list(collection = jaspar_collection))
-  if (length(pfm_list) == 0) return(NULL)
+  if (length(pfm_list) == 0) {
+    return(NULL)
+  }
 
   fg_counts <- colSums(as.matrix(motifmatchr::motifMatches(motifmatchr::matchMotifs(pfm_list, fg_seq, out = "matches", p.cutoff = pval_thresh))))
   bg_counts <- colSums(as.matrix(motifmatchr::motifMatches(motifmatchr::matchMotifs(pfm_list, bg_seq, out = "matches", p.cutoff = pval_thresh))))
@@ -886,7 +996,9 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
     if (a > 0) {
       ft <- fisher.test(matrix(c(a, b, length(fg_seq) - a, length(bg_seq) - b), nrow = 2), alternative = "greater")
       data.frame(MotifID = m, MotifName = TFBSTools::name(pfm_list[[m]]), Pvalue = ft$p.value, OddsRatio = ft$estimate, FG_Hits = a, FG_Total = length(fg_seq), BG_Hits = b, BG_Total = length(bg_seq))
-    } else NULL
+    } else {
+      NULL
+    }
   })
 
   res_df <- do.call(rbind, Filter(Negate(is.null), results_list))
@@ -901,25 +1013,38 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
 #' @return A \code{ggplot} barplot, or \code{NULL} if input is empty.
 #' @keywords internal
 .plot_save_motif <- function(res_df, prefix) {
-  if (is.null(res_df) || nrow(res_df) == 0) return(NULL)
+  if (is.null(res_df) || nrow(res_df) == 0) {
+    return(NULL)
+  }
   top_df <- head(res_df, 15)
   top_df$MotifLabel <- factor(paste0(top_df$MotifName, " (", top_df$MotifID, ")"), levels = rev(paste0(top_df$MotifName, " (", top_df$MotifID, ")")))
-  return(ggplot2::ggplot(top_df, ggplot2::aes(x = -log10(.data$Pvalue), y = MotifLabel)) + ggplot2::geom_col(fill = "#E7298A", width = 0.7) + ggplot2::labs(title = paste0("Motif Enrichment: ", basename(prefix)), x = "-log10(P-value)", y = NULL) + ggplot2::theme_classic())
+  return(ggplot2::ggplot(top_df, ggplot2::aes(x = -log10(.data$Pvalue), y = MotifLabel)) +
+    ggplot2::geom_col(fill = "#E7298A", width = 0.7) +
+    ggplot2::labs(title = paste0("Motif Enrichment: ", basename(prefix)), x = "-log10(P-value)", y = NULL) +
+    ggplot2::theme_classic())
 }
 
 #' @title Plot Top Motif Sequence Logos
 #' @return A list of sequence logo plots, or \code{NULL} if input is empty.
 #' @keywords internal
-.plot_top_motif_logos <- function(res_df, top_n,
-  jaspar_db = JASPAR2020::JASPAR2020) {
-  if (is.null(res_df) || nrow(res_df) == 0) return(NULL)
+.plot_top_motif_logos <- function(
+  res_df, top_n,
+  jaspar_db = JASPAR2020::JASPAR2020
+) {
+  if (is.null(res_df) || nrow(res_df) == 0) {
+    return(NULL)
+  }
   top_df <- head(res_df[order(res_df$Pvalue), ], top_n)
   pfm_list <- TFBSTools::getMatrixSet(jaspar_db, opts = list(ID = top_df$MotifID))
-  if (length(pfm_list) == 0) return(NULL)
+  if (length(pfm_list) == 0) {
+    return(NULL)
+  }
 
   plot_list <- list()
   for (i in seq_along(top_df$MotifID)) if (top_df$MotifID[i] %in% names(pfm_list)) plot_list[[paste0(top_df$MotifName[i], " (", top_df$MotifID[i], ")")]] <- TFBSTools::Matrix(pfm_list[[top_df$MotifID[i]]])
-  if (length(plot_list) == 0) return(NULL)
+  if (length(plot_list) == 0) {
+    return(NULL)
+  }
 
   return(ggseqlogo::ggseqlogo(plot_list, ncol = 1) + ggplot2::theme_classic() + ggplot2::theme(axis.text.x = ggplot2::element_blank(), strip.text = ggplot2::element_text(size = 10, face = "bold", hjust = 0), strip.background = ggplot2::element_rect(fill = "grey95", color = NA)) + ggplot2::labs(y = "Bits", title = paste0("Top ", top_n, " Enriched Motifs (SeqLogo)")))
 }
@@ -927,9 +1052,13 @@ run_distal_motif_analysis <- function(target_genes, loop_df, genome_id, pval_thr
 #' @title Annotate Motif Families
 #' @return A data frame with added \code{Family} column, sorted by P-value.
 #' @keywords internal
-.annotate_motif_families <- function(res_df,
-  jaspar_db = JASPAR2020::JASPAR2020, jaspar_collection = "CORE") {
-  if (is.null(res_df) || nrow(res_df) == 0) return(res_df)
+.annotate_motif_families <- function(
+  res_df,
+  jaspar_db = JASPAR2020::JASPAR2020, jaspar_collection = "CORE"
+) {
+  if (is.null(res_df) || nrow(res_df) == 0) {
+    return(res_df)
+  }
   meta_df <- do.call(rbind, lapply(TFBSTools::getMatrixSet(jaspar_db, list(collection = jaspar_collection)), function(x) data.frame(MotifID = TFBSTools::ID(x), Family = paste(if (is.null(TFBSTools::tags(x)$family)) "Unknown" else TFBSTools::tags(x)$family, collapse = "; "), stringsAsFactors = FALSE)))
   res_df <- merge(res_df[, !colnames(res_df) %in% c("Family", "Class")], meta_df, by = "MotifID", all.x = TRUE)
   return(res_df[order(res_df$Pvalue), c(c("MotifID", "MotifName", "Family", "Pvalue", "FDR", "OddsRatio", "FG_Hits", "FG_Total", "BG_Hits", "BG_Total"), setdiff(colnames(res_df), c("MotifID", "MotifName", "Family", "Pvalue", "FDR", "OddsRatio", "FG_Hits", "FG_Total", "BG_Hits", "BG_Total")))])
@@ -1046,7 +1175,9 @@ looplook_report <- function(
 ) {
   # Locate template
   template <- system.file("rmarkdown", "templates", "looplook-report",
-    "skeleton", "skeleton.Rmd", package = "looplook")
+    "skeleton", "skeleton.Rmd",
+    package = "looplook"
+  )
   if (!nzchar(template)) stop("Report template not found. Reinstall looplook.")
 
   # Create output directory

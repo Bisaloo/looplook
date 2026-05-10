@@ -1,12 +1,13 @@
 # tests/testthat/test-annotation.R
 
 test_that("Module 2: annotate_peaks_and_loops runs comprehensive Example A", {
-
   global_out <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
   expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
   atac_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-  skip_if(global_out == "" || expr_path == "" || atac_path == "",
-    "Test data not available")
+  skip_if(
+    global_out == "" || expr_path == "" || atac_path == "",
+    "Test data not available"
+  )
 
 
   skip_if(global_out == "" || expr_path == "" || atac_path == "")

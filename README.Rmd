@@ -32,7 +32,7 @@ Beyond its utility as a tool for integrative target annotation, `looplook` can b
 `looplook` extensively leverages the Bioconductor ecosystem for **robust genomic arithmetic and annotation**. To ensure optimal compatibility, please ensure your **system environment** is fully up to date prior to installation:
 
 ```{r, eval = FALSE}
-# Installation from GitHub 
+# Installation from GitHub
 if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
 BiocManager::install(c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"))
 
@@ -83,7 +83,7 @@ This module serves as the **core target mapping engine**. It seamlessly executes
 ```{r}
 # Use pre-computed example annotation (or run annotate_peaks_and_loops with example data)
 rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
-load(rdata_path)  # loads res_integrated
+load(rdata_path) # loads res_integrated
 ```
 
 **Output Data Dictionary: The Comprehensive 3D Spatial Catalog**
@@ -212,10 +212,10 @@ To facilitate intuitive data exploration and result interpretation, an integrate
 ```{r, eval = FALSE}
 # One-click report (renders a standalone HTML via nested rmarkdown)
 looplook::looplook_report(
-  bedpe_file   = system.file("extdata", "example_loops_1.bedpe", package = "looplook"),
-  target_bed   = system.file("extdata", "example_peaks.bed", package = "looplook"),
+  bedpe_file = system.file("extdata", "example_loops_1.bedpe", package = "looplook"),
+  target_bed = system.file("extdata", "example_peaks.bed", package = "looplook"),
   expr_matrix_file = system.file("extdata", "example_tpm.txt", package = "looplook"),
-  diff_file    = system.file("extdata", "example_deg.txt", package = "looplook"),
+  diff_file = system.file("extdata", "example_deg.txt", package = "looplook"),
   metadata_file = system.file("extdata", "example_coldata.txt", package = "looplook"),
   project_name = "My HiChIP Study"
 )

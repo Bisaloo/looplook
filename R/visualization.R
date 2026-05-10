@@ -1,4 +1,3 @@
-
 #' Internal: Prepare Track Data for IGV-Style Plot
 #'
 #' Reads BEDPE, optional BED, and gene annotation data; computes bezier curves,
@@ -19,9 +18,11 @@
 #' @return A named list of all data frames and plot parameters.
 #' @keywords internal
 #' @noRd
-prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
+prepare_track_data <- function(
+  bedpe_file, target_bed, chr, from, to, species,
   max_levels, base_anchor_height, loop_color, anchor_color, score_to_alpha,
-  min_score) {
+  min_score
+) {
   # Species config
   species_map <- list(
     hg38 = c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"),
@@ -40,8 +41,10 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
 
   # Read BEDPE (0-based) and convert to 1-based for internal use
   loops_raw <- as.data.frame(data.table::fread(bedpe_file, header = FALSE))
-  colnames(loops_raw)[seq_len(6)] <- c("chr1", "start1", "end1", "chr2",
-    "start2", "end2")
+  colnames(loops_raw)[seq_len(6)] <- c(
+    "chr1", "start1", "end1", "chr2",
+    "start2", "end2"
+  )
   loops_raw$start1 <- loops_raw$start1 + 1
   loops_raw$start2 <- loops_raw$start2 + 1
 
@@ -63,7 +66,8 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
   loops <- loops_raw %>%
     dplyr::mutate(
       dplyr::across(c(start1, end1, start2, end2), as.numeric),
-      chr1 = as.character(chr1), chr2 = as.character(chr2))
+      chr1 = as.character(chr1), chr2 = as.character(chr2)
+    )
   if (has_score) {
     loops$score <- as.numeric(loops$score)
     if (!is.null(min_score)) {
@@ -77,8 +81,22 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
     chr <- names(sort(table(all_chr), decreasing = TRUE))[1]
   }
   loops_chr <- loops %>% dplyr::filter(chr1 == chr2 & chr1 == chr)
-  if (is.null(from)) from <- if (nrow(loops_chr) > 0) min(c(loops_chr$start1, loops_chr$start2)) else { warning("No loops found on ", chr, "; using coordinate 1"); 1 }
-  if (is.null(to))   to  <- if (nrow(loops_chr) > 0) max(c(loops_chr$end1, loops_chr$end2))   else { warning("No loops found on ", chr, "; using coordinate 1"); 1 }
+  if (is.null(from)) {
+    from <- if (nrow(loops_chr) > 0) {
+      min(c(loops_chr$start1, loops_chr$start2))
+    } else {
+      warning("No loops found on ", chr, "; using coordinate 1")
+      1
+    }
+  }
+  if (is.null(to)) {
+    to <- if (nrow(loops_chr) > 0) {
+      max(c(loops_chr$end1, loops_chr$end2))
+    } else {
+      warning("No loops found on ", chr, "; using coordinate 1")
+      1
+    }
+  }
 
   loops_view <- loops_chr %>%
     dplyr::filter((end1 >= from & start1 <= to) |
@@ -93,23 +111,31 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
 
   if (nrow(loops_view) > 0) {
     anchors <- dplyr::bind_rows(
-      loops_view %>% dplyr::transmute(chr = chr1, start = start1, end = end1,
-        loop_i = dplyr::row_number(), score = if (has_score) score else 1),
-      loops_view %>% dplyr::transmute(chr = chr2, start = start2, end = end2,
-        loop_i = dplyr::row_number(), score = if (has_score) score else 1)
+      loops_view %>% dplyr::transmute(
+        chr = chr1, start = start1, end = end1,
+        loop_i = dplyr::row_number(), score = if (has_score) score else 1
+      ),
+      loops_view %>% dplyr::transmute(
+        chr = chr2, start = start2, end = end2,
+        loop_i = dplyr::row_number(), score = if (has_score) score else 1
+      )
     ) %>% dplyr::mutate(ymin = 0, ymax = anchor_ymax)
 
     loops_calc <- loops_view %>%
-      dplyr::mutate(mid1 = (start1 + end1) / 2, mid2 = (start2 + end2) / 2,
+      dplyr::mutate(
+        mid1 = (start1 + end1) / 2, mid2 = (start2 + end2) / 2,
         loop_i = dplyr::row_number(), center = (mid1 + mid2) / 2,
-        peak = anchor_ymax + (max_levels * 0.1) + 0.1)
+        peak = anchor_ymax + (max_levels * 0.1) + 0.1
+      )
 
     bez_list <- lapply(seq_len(nrow(loops_calc)), function(i) {
       d <- loops_calc[i, ]
-      data.frame(loop_i = d$loop_i,
+      data.frame(
+        loop_i = d$loop_i,
         x = c(d$mid1, d$center, d$mid2),
         y = c(anchor_ymax, d$peak, anchor_ymax),
-        score = if (has_score) d$score else 1, stringsAsFactors = FALSE)
+        score = if (has_score) d$score else 1, stringsAsFactors = FALSE
+      )
     })
     bez_df <- do.call(rbind, bez_list)
     plot_ymax <- max(bez_df$y) * 1.05
@@ -118,10 +144,14 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
       if (anyNA(scores)) scores[is.na(scores)] <- min(scores, na.rm = TRUE)
       alphas <- if (use_alpha && max(scores) != min(scores)) {
         scales::rescale(scores, to = c(0.1, 1.0))
-      } else rep(0.8, length(scores))
+      } else {
+        rep(0.8, length(scores))
+      }
       rgb_val <- col2rgb(base_col)
-      rgb(rgb_val[1], rgb_val[2], rgb_val[3], alpha = alphas * 255,
-        maxColorValue = 255)
+      rgb(rgb_val[1], rgb_val[2], rgb_val[3],
+        alpha = alphas * 255,
+        maxColorValue = 255
+      )
     }
     do_map <- has_score && score_to_alpha
     bez_df$final_color <- calc_alpha_color(bez_df$score, loop_color, do_map)
@@ -133,7 +163,7 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
   if (!is.null(target_bed)) {
     ob <- as.data.frame(data.table::fread(target_bed, header = FALSE, select = seq_len(3)))
     colnames(ob) <- c("chr", "start", "end")
-    ob$start <- ob$start + 1  # BED is 0-based; convert to 1-based
+    ob$start <- ob$start + 1 # BED is 0-based; convert to 1-based
     overlap_df_plot <- ob %>%
       dplyr::filter(chr == !!chr, !(end < from | start > to)) %>%
       dplyr::mutate(ymin = -0.15, ymax = -0.10)
@@ -150,28 +180,41 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
     org_db <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
     try(
       {
+        valid_keys <- AnnotationDbi::keytypes(org_db)
+        primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+
         symbol_map <- AnnotationDbi::select(org_db,
           keys = unique(as.character(genes_df$gene_id)),
-          columns = "SYMBOL", keytype = "ENTREZID")
-        symbol_map <- symbol_map[!duplicated(symbol_map$ENTREZID), ]
-        genes_df <- dplyr::left_join(genes_df, symbol_map,
-          by = c("gene_id" = "ENTREZID"))
+          columns = "SYMBOL", keytype = primary_key
+        )
+        symbol_map <- symbol_map[!duplicated(symbol_map[[primary_key]]), ]
+
+        join_by_args <- setNames(primary_key, "gene_id")
+        genes_df <- dplyr::left_join(genes_df, symbol_map, by = join_by_args)
       },
-      silent = TRUE)
-
-    if (!"SYMBOL" %in% colnames(genes_df))
+      silent = TRUE
+    )
+    if (!"SYMBOL" %in% colnames(genes_df)) {
       genes_df$SYMBOL <- genes_df$gene_id
+    }
     genes_df <- genes_df %>%
-      dplyr::mutate(final_label = ifelse(is.na(SYMBOL), gene_id, SYMBOL),
-        label_x = pmax(from, pmin(to, ifelse(strand == "+", start, end))))
+      dplyr::mutate(
+        final_label = ifelse(is.na(SYMBOL), gene_id, SYMBOL),
+        label_x = pmax(from, pmin(to, ifelse(strand == "+", start, end)))
+      )
     genes_df$gene_level <- IRanges::disjointBins(
-      IRanges::IRanges(genes_df$start, genes_df$end))
+      IRanges::IRanges(genes_df$start, genes_df$end)
+    )
 
-    tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb))
-      "TXNAME" else "TXID"
+    tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb)) {
+      "TXNAME"
+    } else {
+      "TXID"
+    }
     tx2gene <- AnnotationDbi::select(txdb,
       keys = AnnotationDbi::keys(txdb, tx_keytype),
-      columns = "GENEID", keytype = tx_keytype)
+      columns = "GENEID", keytype = tx_keytype
+    )
     colnames(tx2gene) <- c("tx_id", "gene_id")
 
     exons_list <- GenomicFeatures::exonsBy(txdb, "tx", use.names = TRUE)
@@ -179,7 +222,8 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
     names(exons_gr) <- NULL
     exons_flat <- as.data.frame(exons_gr)
     exons_flat$tx_id <- rep(names(exons_list),
-      times = S4Vectors::elementNROWS(exons_list))
+      times = S4Vectors::elementNROWS(exons_list)
+    )
     exons_joined <- exons_flat %>%
       dplyr::left_join(tx2gene, by = "tx_id") %>%
       dplyr::filter(gene_id %in% genes_df$gene_id) %>%
@@ -190,18 +234,22 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
         dplyr::group_by(gene_id, tx_id) %>%
         dplyr::summarise(len = sum(width), .groups = "drop") %>%
         dplyr::arrange(desc(len)) %>%
-        dplyr::group_by(gene_id) %>% dplyr::slice(1)
+        dplyr::group_by(gene_id) %>%
+        dplyr::slice(1)
       feature_df <- exons_joined %>%
         dplyr::filter(tx_id %in% longest_tx$tx_id) %>%
         dplyr::left_join(genes_df[, c("gene_id", "gene_level")],
-          by = "gene_id")
+          by = "gene_id"
+        )
     }
   }
 
-  list(chr = chr, from = from, to = to, text_indent = text_indent,
+  list(
+    chr = chr, from = from, to = to, text_indent = text_indent,
     bez_df = bez_df, anchors = anchors, overlap_df_plot = overlap_df_plot,
     genes_df = genes_df, feature_df = feature_df,
-    plot_ymax = plot_ymax)
+    plot_ymax = plot_ymax
+  )
 }
 
 #' Integrative visualization of 3D chromatin loops and genomic features
@@ -257,7 +305,7 @@ prepare_track_data <- function(bedpe_file, target_bed, chr, from, to, species,
 #'     target_bed = bed_path,
 #'     chr = "chr1",
 #'     from = 11884299,
-#'     to   = 12106581,
+#'     to = 12106581,
 #'     species = "hg38"
 #'   )
 #'   print(p)
@@ -280,9 +328,11 @@ plot_peaks_interactions <- function(
   min_score = NULL,
   save_file = NULL
 ) {
-  d <- prepare_track_data(bedpe_file, target_bed, chr, from, to, species,
+  d <- prepare_track_data(
+    bedpe_file, target_bed, chr, from, to, species,
     max_levels, base_anchor_height, loop_color, anchor_color,
-    score_to_alpha, min_score)
+    score_to_alpha, min_score
+  )
 
   chr <- d$chr
   from <- d$from
@@ -298,83 +348,123 @@ plot_peaks_interactions <- function(
     plot_ymin <- min(d$genes_df$y_mid) - 0.2
     if (nrow(d$feature_df) > 0) {
       d$feature_df <- d$feature_df %>%
-        dplyr::mutate(y_mid = gene_start_y - (gene_level - 1) * row_height,
-          ymin = y_mid - 0.025, ymax = y_mid + 0.025)
+        dplyr::mutate(
+          y_mid = gene_start_y - (gene_level - 1) * row_height,
+          ymin = y_mid - 0.025, ymax = y_mid + 0.025
+        )
     }
   }
 
   p <- ggplot2::ggplot() +
     ggplot2::geom_hline(yintercept = -0.04, linetype = "dashed", color = "grey85", linewidth = 0.5) +
     ggplot2::geom_hline(yintercept = -0.18, linetype = "dashed", color = "grey85", linewidth = 0.5) +
-    ggplot2::annotate("text", x = d$text_indent, y = d$plot_ymax - 0.01,
-      label = "loop track", hjust = 0, vjust = 1, size = 4, fontface = "bold", color = "black")
+    ggplot2::annotate("text",
+      x = d$text_indent, y = d$plot_ymax - 0.01,
+      label = "loop track", hjust = 0, vjust = 1, size = 4, fontface = "bold", color = "black"
+    )
 
   if (!is.null(d$overlap_df_plot)) {
-    p <- p + ggplot2::annotate("text", x = d$text_indent, y = -0.08,
-      label = "target track", hjust = 0, vjust = 0, size = 4, fontface = "bold", color = "black")
+    p <- p + ggplot2::annotate("text",
+      x = d$text_indent, y = -0.08,
+      label = "target track", hjust = 0, vjust = 0, size = 4, fontface = "bold", color = "black"
+    )
   }
-  p <- p + ggplot2::annotate("text", x = d$text_indent, y = -0.21,
-    label = "gene track", hjust = 0, vjust = 0, size = 4, fontface = "bold", color = "black")
+  p <- p + ggplot2::annotate("text",
+    x = d$text_indent, y = -0.21,
+    label = "gene track", hjust = 0, vjust = 0, size = 4, fontface = "bold", color = "black"
+  )
 
   if (!is.null(d$overlap_df_plot)) {
-    p <- p + ggplot2::geom_rect(data = d$overlap_df_plot,
+    p <- p + ggplot2::geom_rect(
+      data = d$overlap_df_plot,
       ggplot2::aes(xmin = start, xmax = end, ymin = ymin, ymax = ymax),
-      fill = overlap_color, alpha = 1)
+      fill = overlap_color, alpha = 1
+    )
   }
 
   if (nrow(d$genes_df) > 0) {
     p <- p +
-      ggplot2::geom_segment(data = d$genes_df,
-        ggplot2::aes(x = pmax(start, from), xend = pmin(end, to),
-          y = y_mid, yend = y_mid), color = intron_color, linewidth = 0.5) +
-      ggplot2::geom_segment(data = d$genes_df,
-        ggplot2::aes(x = ifelse(strand == "+", pmin(end, to), pmax(start, from)),
+      ggplot2::geom_segment(
+        data = d$genes_df,
+        ggplot2::aes(
+          x = pmax(start, from), xend = pmin(end, to),
+          y = y_mid, yend = y_mid
+        ), color = intron_color, linewidth = 0.5
+      ) +
+      ggplot2::geom_segment(
+        data = d$genes_df,
+        ggplot2::aes(
+          x = ifelse(strand == "+", pmin(end, to), pmax(start, from)),
           xend = ifelse(strand == "+", pmin(end, to), pmax(start, from)),
-          y = y_mid, yend = y_mid),
+          y = y_mid, yend = y_mid
+        ),
         arrow = ggplot2::arrow(length = ggplot2::unit(0.15, "cm"), type = "open"),
-        color = intron_color, linewidth = 0.5)
+        color = intron_color, linewidth = 0.5
+      )
 
     if (nrow(d$feature_df) > 0) {
-      p <- p + ggplot2::geom_rect(data = d$feature_df,
-        ggplot2::aes(xmin = pmax(start, from), xmax = pmin(end, to),
-          ymin = ymin, ymax = ymax), fill = exon_color, color = NA)
+      p <- p + ggplot2::geom_rect(
+        data = d$feature_df,
+        ggplot2::aes(
+          xmin = pmax(start, from), xmax = pmin(end, to),
+          ymin = ymin, ymax = ymax
+        ), fill = exon_color, color = NA
+      )
     } else {
-      p <- p + ggplot2::geom_rect(data = d$genes_df,
-        ggplot2::aes(xmin = pmax(start, from), xmax = pmin(end, to),
-          ymin = y_mid - 0.025, ymax = y_mid + 0.025), fill = exon_color)
+      p <- p + ggplot2::geom_rect(
+        data = d$genes_df,
+        ggplot2::aes(
+          xmin = pmax(start, from), xmax = pmin(end, to),
+          ymin = y_mid - 0.025, ymax = y_mid + 0.025
+        ), fill = exon_color
+      )
     }
-    p <- p + ggrepel::geom_text_repel(data = d$genes_df,
+    p <- p + ggrepel::geom_text_repel(
+      data = d$genes_df,
       ggplot2::aes(x = label_x, y = y_mid, label = final_label),
       nudge_y = -0.05, direction = "x", force = 1, size = 3,
       segment.size = 0.3, segment.color = "grey60",
-      segment.linetype = "dashed", min.segment.length = 0)
+      segment.linetype = "dashed", min.segment.length = 0
+    )
   }
 
   if (nrow(d$bez_df) > 0) {
     p <- p +
-      ggplot2::geom_rect(data = d$anchors,
-        ggplot2::aes(xmin = start, xmax = end, ymin = ymin, ymax = ymax,
-          fill = final_fill), color = NA) +
+      ggplot2::geom_rect(
+        data = d$anchors,
+        ggplot2::aes(
+          xmin = start, xmax = end, ymin = ymin, ymax = ymax,
+          fill = final_fill
+        ), color = NA
+      ) +
       ggplot2::scale_fill_identity() +
-      ggforce::geom_bezier(data = d$bez_df,
+      ggforce::geom_bezier(
+        data = d$bez_df,
         ggplot2::aes(x = x, y = y, group = loop_i, color = final_color),
-        linewidth = 0.6) +
+        linewidth = 0.6
+      ) +
       ggplot2::scale_color_identity()
   }
 
   p <- p +
-    ggplot2::coord_cartesian(xlim = c(from, to), ylim = c(plot_ymin, d$plot_ymax),
-      expand = FALSE) +
+    ggplot2::coord_cartesian(
+      xlim = c(from, to), ylim = c(plot_ymin, d$plot_ymax),
+      expand = FALSE
+    ) +
     ggplot2::scale_x_continuous(labels = scales::comma) +
     ggplot2::theme_classic() +
-    ggplot2::theme(axis.line.y = ggplot2::element_blank(),
+    ggplot2::theme(
+      axis.line.y = ggplot2::element_blank(),
       axis.text.y = ggplot2::element_blank(),
       axis.ticks.y = ggplot2::element_blank(),
       axis.title.y = ggplot2::element_blank(),
       panel.border = ggplot2::element_rect(color = "black", fill = NA, size = 1),
-      plot.title = ggplot2::element_text(hjust = 0.5)) +
-    ggplot2::labs(x = paste0(chr, ":", from, "-", to),
-      title = "Loops Integrative View")
+      plot.title = ggplot2::element_text(hjust = 0.5)
+    ) +
+    ggplot2::labs(
+      x = paste0(chr, ":", from, "-", to),
+      title = "Loops Integrative View"
+    )
 
   if (!is.null(save_file)) {
     ggplot2::ggsave(save_file, plot = p, width = 10, height = 5)

@@ -35,8 +35,10 @@ test_that("draw_flower_simplified returns ggplot and handles edge cases", {
     B = c("BRCA1", "MYC", "EGFR"),
     C = c("MYC", "EGFR", "KRAS")
   )
-  p <- looplook:::draw_flower_simplified(gene_sets, "Test_Flower",
-    c(A = "red", B = "blue", C = "green"))
+  p <- looplook:::draw_flower_simplified(
+    gene_sets, "Test_Flower",
+    c(A = "red", B = "blue", C = "green")
+  )
   expect_s3_class(p, "ggplot")
 
   p_null <- looplook:::draw_flower_simplified(list(X = c("A", "B")), "Solo", NULL)
@@ -57,7 +59,9 @@ test_that("draw_upset_intersections returns grob and handles empty input", {
   }
 
   expect_null(
-    looplook:::draw_upset_intersections(list(X = character(0), Y = character(0)),
-      "Empty")
+    looplook:::draw_upset_intersections(
+      list(X = character(0), Y = character(0)),
+      "Empty"
+    )
   )
 })

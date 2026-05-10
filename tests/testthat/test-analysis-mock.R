@@ -9,8 +9,10 @@ test_that(".plot_motif_rank_scatter generates scatter with mock data", {
     Pvalue = 10^-(1:20),
     FDR = c(10^-(1:10), rep(0.5, 10)),
     OddsRatio = runif(20, 0.8, 1.6),
-    Family = c(rep("bZIP", 5), rep("Homeobox", 5), rep("Unknown", 5),
-      rep("bHLH", 5)),
+    Family = c(
+      rep("bZIP", 5), rep("Homeobox", 5), rep("Unknown", 5),
+      rep("bHLH", 5)
+    ),
     stringsAsFactors = FALSE
   )
 
@@ -19,10 +21,13 @@ test_that(".plot_motif_rank_scatter generates scatter with mock data", {
 
   # empty data
   p_null <- looplook:::.plot_motif_rank_scatter(
-    data.frame(MotifID = character(0), MotifName = character(0),
+    data.frame(
+      MotifID = character(0), MotifName = character(0),
       Pvalue = numeric(0), FDR = numeric(0), OddsRatio = numeric(0),
-      Family = character(0), stringsAsFactors = FALSE),
-    "Empty")
+      Family = character(0), stringsAsFactors = FALSE
+    ),
+    "Empty"
+  )
   expect_null(p_null)
 
 
@@ -52,7 +57,8 @@ test_that(".plot_save_motif generates barplot with mock data", {
 
   # empty data
   expect_null(looplook:::.plot_save_motif(
-    mock_res[integer(0), ], "Empty"))
+    mock_res[integer(0), ], "Empty"
+  ))
 })
 
 test_that("run_heatmap_and_connectivity handles distal-only mode with mock data", {
@@ -61,9 +67,12 @@ test_that("run_heatmap_and_connectivity handles distal-only mode with mock data"
 
   genes <- paste0("Gene", 1:30)
   tpm_mat <- as.data.frame(matrix(rnorm(30 * 4), 30, 4,
-    dimnames = list(genes, c("s1", "s2", "s3", "s4"))))
-  meta_raw <- data.frame(SampleID = c("s1", "s2", "s3", "s4"),
-    Group = c("A", "A", "B", "B"), stringsAsFactors = FALSE)
+    dimnames = list(genes, c("s1", "s2", "s3", "s4"))
+  ))
+  meta_raw <- data.frame(
+    SampleID = c("s1", "s2", "s3", "s4"),
+    Group = c("A", "A", "B", "B"), stringsAsFactors = FALSE
+  )
 
   loop_stats <- data.frame(
     Gene = genes[1:15],
@@ -78,7 +87,8 @@ test_that("run_heatmap_and_connectivity handles distal-only mode with mock data"
     targets, tpm_mat, meta_raw, loop_stats, global_glist,
     heatmap_ntop = 50, cor_method = "pearson",
     current_proj_name = "Test_Distal", source_type = "targets",
-    target_col = "n_Linked_Distal", skip_heatmap = TRUE)
+    target_col = "n_Linked_Distal", skip_heatmap = TRUE
+  )
   expect_type(plots, "list")
 })
 
@@ -87,7 +97,10 @@ test_that(".annotate_motif_families handles empty input", {
   expect_null(res_empty)
 
   res_no_rows <- looplook:::.annotate_motif_families(
-    data.frame(MotifID = character(0), MotifName = character(0),
-      Pvalue = numeric(0), stringsAsFactors = FALSE))
+    data.frame(
+      MotifID = character(0), MotifName = character(0),
+      Pvalue = numeric(0), stringsAsFactors = FALSE
+    )
+  )
   expect_equal(nrow(res_no_rows), 0)
 })

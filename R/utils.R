@@ -61,7 +61,9 @@ if (getRversion() >= "2.15.1") {
 #' @return A unique, non-empty, non-NA character vector.
 #' @keywords internal
 clean_gene_names <- function(x, split = NULL) {
-  if (is.null(x) || length(x) == 0) return(character(0))
+  if (is.null(x) || length(x) == 0) {
+    return(character(0))
+  }
   if (!is.null(split)) x <- unlist(strsplit(as.character(x), split))
   x <- unique(trimws(as.character(x)))
   x[x != "" & !is.na(x)]
@@ -80,7 +82,9 @@ clean_gene_names <- function(x, split = NULL) {
 extract_genes <- function(genes_vec) {
   res <- unique(na.omit(unlist(strsplit(as.character(genes_vec), ";"))))
   res <- res[nzchar(res)]
-  if (length(res) == 0) return(NA_character_)
+  if (length(res) == 0) {
+    return(NA_character_)
+  }
   paste(res, collapse = ";")
 }
 
@@ -107,16 +111,25 @@ extract_genes <- function(genes_vec) {
 #' @importFrom GenomicFeatures genes promoters
 #' @importFrom S4Vectors queryHits subjectHits
 #' @keywords internal
-resolve_gene_conflicts <- function(current_anno_df, txdb_obj, org_db_pkg,
-  tss_region, gene_expr_map) {
-  if (nrow(current_anno_df) == 0) return(current_anno_df)
+resolve_gene_conflicts <- function(
+  current_anno_df, txdb_obj, org_db_pkg,
+  tss_region, gene_expr_map
+) {
+  if (nrow(current_anno_df) == 0) {
+    return(current_anno_df)
+  }
 
   gr_input <- GenomicRanges::makeGRangesFromDataFrame(current_anno_df,
-    keep.extra.columns = TRUE)
+    keep.extra.columns = TRUE
+  )
   all_genes <- GenomicFeatures::genes(txdb_obj)
-  hits <- GenomicRanges::findOverlaps(gr_input,
-    GenomicFeatures::promoters(all_genes, upstream = abs(tss_region[1]),
-      downstream = abs(tss_region[2])))
+  hits <- GenomicRanges::findOverlaps(
+    gr_input,
+    GenomicFeatures::promoters(all_genes,
+      upstream = abs(tss_region[1]),
+      downstream = abs(tss_region[2])
+    )
+  )
 
   if (length(hits) > 0) {
     candidates <- data.frame(
@@ -125,30 +138,48 @@ resolve_gene_conflicts <- function(current_anno_df, txdb_obj, org_db_pkg,
       stringsAsFactors = FALSE
     )
 
+    org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
+    valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+    primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
+
+    cols_to_get <- "SYMBOL"
+    valid_cols <- AnnotationDbi::columns(org_db_obj)
+    has_genetype <- "GENETYPE" %in% valid_cols
+    if (has_genetype) cols_to_get <- c(cols_to_get, "GENETYPE")
+
     gene_map <- AnnotationDbi::select(
-      utils::getFromNamespace(org_db_pkg, org_db_pkg),
+      org_db_obj,
       keys = unique(candidates$gene_id),
-      columns = c("SYMBOL", "GENETYPE"),
-      keytype = "ENTREZID"
+      columns = cols_to_get,
+      keytype = primary_key
     )
 
-    gene_map$tpm <- if (!is.null(gene_expr_map))
+    gene_map$tpm <- if (!is.null(gene_expr_map)) {
       ifelse(is.na(gene_expr_map[gene_map$SYMBOL]), 0,
-        gene_expr_map[gene_map$SYMBOL]) else 0
-
-    gene_map <- gene_map %>%
-      dplyr::mutate(
-        type_rank = dplyr::case_when(
-          grepl("protein", GENETYPE, ignore.case = TRUE) ~ 1,
-          grepl("antisense", GENETYPE, ignore.case = TRUE) ~ 2,
-          grepl("lncRNA|ncrna", GENETYPE, ignore.case = TRUE) ~ 3,
-          grepl("pseudo", GENETYPE, ignore.case = TRUE) ~ 4,
-          TRUE ~ 5
-        )
+        gene_expr_map[gene_map$SYMBOL]
       )
+    } else {
+      0
+    }
 
+    if (has_genetype) {
+      gene_map <- gene_map %>%
+        dplyr::mutate(
+          type_rank = dplyr::case_when(
+            grepl("protein", GENETYPE, ignore.case = TRUE) ~ 1,
+            grepl("antisense", GENETYPE, ignore.case = TRUE) ~ 2,
+            grepl("lncRNA|ncrna", GENETYPE, ignore.case = TRUE) ~ 3,
+            grepl("pseudo", GENETYPE, ignore.case = TRUE) ~ 4,
+            TRUE ~ 5
+          )
+        )
+    } else {
+      gene_map$type_rank <- 1 # All genes have equal rank if GENETYPE is missing
+    }
+
+    join_by_args <- setNames(primary_key, "gene_id")
     resolved_candidates <- candidates %>%
-      dplyr::left_join(gene_map, by = c("gene_id" = "ENTREZID")) %>%
+      dplyr::left_join(gene_map, by = join_by_args) %>%
       dplyr::group_by(query_idx) %>%
       dplyr::mutate(has_active = any(tpm > 0)) %>%
       dplyr::filter(!has_active | tpm > 0) %>%
@@ -181,13 +212,17 @@ resolve_gene_conflicts <- function(current_anno_df, txdb_obj, org_db_pkg,
       dplyr::ungroup() %>%
       dplyr::filter(!is.na(final_symbols))
 
-    if (!"SYMBOL" %in% colnames(current_anno_df))
+    if (!"SYMBOL" %in% colnames(current_anno_df)) {
       current_anno_df$SYMBOL <- NA_character_
-    if (!"annotation" %in% colnames(current_anno_df))
+    }
+    if (!"annotation" %in% colnames(current_anno_df)) {
       current_anno_df$annotation <- NA_character_
+    }
 
-    match_idx <- match(resolved_candidates$query_idx,
-      seq_len(nrow(current_anno_df)))
+    match_idx <- match(
+      resolved_candidates$query_idx,
+      seq_len(nrow(current_anno_df))
+    )
     valid_idx <- !is.na(match_idx)
 
     if (any(valid_idx)) {
@@ -226,7 +261,8 @@ clean_anchor <- function(g, t, allow, down) {
   }
   if (down) {
     new_type <- dplyr::case_when(
-      t_char == "P" ~ "eP", t_char == "G" ~ "eG", TRUE ~ t_char)
+      t_char == "P" ~ "eP", t_char == "G" ~ "eG", TRUE ~ t_char
+    )
     return(list(type = new_type, gene = NA_character_))
   }
   return(list(type = t_char, gene = NA_character_))
@@ -249,11 +285,14 @@ clean_anchor <- function(g, t, allow, down) {
 #'   data frames.
 #' @importFrom stats quantile
 #' @keywords internal
-compute_refined_stats <- function(loop_df, upstream_promoter_stats,
-  upstream_distal_stats, vals, threshold, hub_percentile) {
-
+compute_refined_stats <- function(
+  loop_df, upstream_promoter_stats,
+  upstream_distal_stats, vals, threshold, hub_percentile
+) {
   get_dom <- function(x) {
-    if (length(x) == 0) return(NA_character_)
+    if (length(x) == 0) {
+      return(NA_character_)
+    }
     names(which.max(table(x)))
   }
   get_expr <- function(g) {
@@ -264,11 +303,15 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
 
   raw_stats_df <- dplyr::bind_rows(
     loop_df %>% dplyr::filter(anchor1_type == "P" & !is.na(anchor1_gene)) %>%
-      dplyr::select(Gene = anchor1_gene, Neighbor_Type = anchor2_type,
-        Loop_Type = loop_type),
+      dplyr::select(
+        Gene = anchor1_gene, Neighbor_Type = anchor2_type,
+        Loop_Type = loop_type
+      ),
     loop_df %>% dplyr::filter(anchor2_type == "P" & !is.na(anchor2_gene)) %>%
-      dplyr::select(Gene = anchor2_gene, Neighbor_Type = anchor1_type,
-        Loop_Type = loop_type)
+      dplyr::select(
+        Gene = anchor2_gene, Neighbor_Type = anchor1_type,
+        Loop_Type = loop_type
+      )
   ) %>%
     tidyr::separate_rows(Gene, sep = ";") %>%
     dplyr::mutate(Gene = trimws(Gene)) %>%
@@ -278,7 +321,9 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
       Total_Loops_Filtered = dplyr::n(),
       n_Linked_Promoters_Filtered = sum(Neighbor_Type == "P", na.rm = TRUE),
       n_Linked_Distal_Filtered = sum(
-        Neighbor_Type %in% c("E", "eP", "eG", "G"), na.rm = TRUE),
+        Neighbor_Type %in% c("E", "eP", "eG", "G"),
+        na.rm = TRUE
+      ),
       Dominant_Interaction_Filtered = get_dom(Loop_Type),
       .groups = "drop"
     )
@@ -286,9 +331,13 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
   promoter_centric_df <- NULL
   if (nrow(raw_stats_df) > 0) {
     final_cutoff <- max(stats::quantile(
-      raw_stats_df$Total_Loops_Filtered, hub_percentile, na.rm = TRUE), 3)
+      raw_stats_df$Total_Loops_Filtered, hub_percentile,
+      na.rm = TRUE
+    ), 3)
     distal_cutoff <- max(stats::quantile(
-      raw_stats_df$n_Linked_Distal_Filtered, hub_percentile, na.rm = TRUE), 2)
+      raw_stats_df$n_Linked_Distal_Filtered, hub_percentile,
+      na.rm = TRUE
+    ), 2)
 
     if (!is.null(upstream_promoter_stats)) {
       promoter_centric_df <- upstream_promoter_stats %>%
@@ -298,42 +347,57 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
           n_Linked_Promoters = dplyr::coalesce(n_Linked_Promoters_Filtered, 0),
           n_Linked_Distal = dplyr::coalesce(n_Linked_Distal_Filtered, 0),
           Dominant_Interaction = dplyr::coalesce(
-            Dominant_Interaction_Filtered, "None"),
+            Dominant_Interaction_Filtered, "None"
+          ),
           Mean_Expression_Temp = get_expr(Gene),
           Is_Active_Gene = dplyr::if_else(
-            Mean_Expression_Temp > threshold, "Yes", "No"),
+            Mean_Expression_Temp > threshold, "Yes", "No"
+          ),
           Is_High_Connectivity_Gene = dplyr::if_else(
-            Total_Loops >= final_cutoff, "Yes", "No"),
+            Total_Loops >= final_cutoff, "Yes", "No"
+          ),
           Is_High_Distal_Connectivity_Gene = dplyr::if_else(
-            n_Linked_Distal >= distal_cutoff, "Yes", "No")
+            n_Linked_Distal >= distal_cutoff, "Yes", "No"
+          )
         ) %>%
-        dplyr::select(Gene, Total_Loops, n_Linked_Promoters, n_Linked_Distal,
+        dplyr::select(
+          Gene, Total_Loops, n_Linked_Promoters, n_Linked_Distal,
           Dominant_Interaction, Is_High_Connectivity_Gene,
           Is_High_Distal_Connectivity_Gene, Is_Active_Gene,
-          dplyr::everything()) %>%
-        dplyr::select(-any_of(c("Total_Loops_Filtered",
+          dplyr::everything()
+        ) %>%
+        dplyr::select(-any_of(c(
+          "Total_Loops_Filtered",
           "n_Linked_Promoters_Filtered", "n_Linked_Distal_Filtered",
           "Dominant_Interaction_Filtered", "Is_Regulatory_Hub",
-          "Mean_Expression_Temp", "n_Linked_Enhancers", "n_Linked_GeneBodies")))
+          "Mean_Expression_Temp", "n_Linked_Enhancers", "n_Linked_GeneBodies"
+        )))
     } else {
       promoter_centric_df <- raw_stats_df %>%
-        dplyr::rename(Total_Loops = Total_Loops_Filtered,
+        dplyr::rename(
+          Total_Loops = Total_Loops_Filtered,
           n_Linked_Promoters = n_Linked_Promoters_Filtered,
           n_Linked_Distal = n_Linked_Distal_Filtered,
-          Dominant_Interaction = Dominant_Interaction_Filtered) %>%
+          Dominant_Interaction = Dominant_Interaction_Filtered
+        ) %>%
         dplyr::mutate(
           Mean_Expression_Temp = get_expr(Gene),
           Is_Active_Gene = dplyr::if_else(
-            Mean_Expression_Temp > threshold, "Yes", "No"),
+            Mean_Expression_Temp > threshold, "Yes", "No"
+          ),
           Is_High_Connectivity_Gene = dplyr::if_else(
-            Total_Loops >= final_cutoff, "Yes", "No"),
+            Total_Loops >= final_cutoff, "Yes", "No"
+          ),
           Is_High_Distal_Connectivity_Gene = dplyr::if_else(
-            n_Linked_Distal >= distal_cutoff, "Yes", "No")
+            n_Linked_Distal >= distal_cutoff, "Yes", "No"
+          )
         ) %>%
-        dplyr::select(Gene, Total_Loops, n_Linked_Promoters, n_Linked_Distal,
+        dplyr::select(
+          Gene, Total_Loops, n_Linked_Promoters, n_Linked_Distal,
           Dominant_Interaction, Is_High_Connectivity_Gene,
           Is_High_Distal_Connectivity_Gene, Is_Active_Gene,
-          dplyr::everything()) %>%
+          dplyr::everything()
+        ) %>%
         dplyr::select(-any_of("Mean_Expression_Temp"))
     }
     promoter_centric_df <- promoter_centric_df %>%
@@ -344,34 +408,47 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
   if ("a1_id" %in% colnames(loop_df)) {
     distal_raw_df <- dplyr::bind_rows(
       loop_df %>% dplyr::filter(anchor1_type %in% c("E", "eP", "eG", "G")) %>%
-        dplyr::select(Distal_Anchor_ID = a1_id, Neighbor_Type = anchor2_type,
-          Loop_Type = loop_type, Neighbor_Gene = anchor2_gene),
+        dplyr::select(
+          Distal_Anchor_ID = a1_id, Neighbor_Type = anchor2_type,
+          Loop_Type = loop_type, Neighbor_Gene = anchor2_gene
+        ),
       loop_df %>% dplyr::filter(anchor2_type %in% c("E", "eP", "eG", "G")) %>%
-        dplyr::select(Distal_Anchor_ID = a2_id, Neighbor_Type = anchor1_type,
-          Loop_Type = loop_type, Neighbor_Gene = anchor1_gene)
+        dplyr::select(
+          Distal_Anchor_ID = a2_id, Neighbor_Type = anchor1_type,
+          Loop_Type = loop_type, Neighbor_Gene = anchor1_gene
+        )
     ) %>%
       dplyr::group_by(Distal_Anchor_ID) %>%
       dplyr::summarise(
         Total_Loops_Filtered = dplyr::n(),
         n_Linked_Distal_Filtered = sum(
-          Neighbor_Type %in% c("E", "eP", "eG", "G"), na.rm = TRUE),
+          Neighbor_Type %in% c("E", "eP", "eG", "G"),
+          na.rm = TRUE
+        ),
         n_Linked_Promoters_Filtered = sum(Neighbor_Type == "P", na.rm = TRUE),
         Dominant_Interaction_Filtered = get_dom(Loop_Type),
         Target_Genes_Filtered = extract_genes(
-          Neighbor_Gene[Neighbor_Type == "P"]),
+          Neighbor_Gene[Neighbor_Type == "P"]
+        ),
         .groups = "drop"
       )
 
     anchor_map <- dplyr::bind_rows(
-      loop_df %>% dplyr::select(anchor_id = a1_id, chr = chr1,
-        start = start1, end = end1, cluster_id),
-      loop_df %>% dplyr::select(anchor_id = a2_id, chr = chr2,
-        start = start2, end = end2, cluster_id)
+      loop_df %>% dplyr::select(
+        anchor_id = a1_id, chr = chr1,
+        start = start1, end = end1, cluster_id
+      ),
+      loop_df %>% dplyr::select(
+        anchor_id = a2_id, chr = chr2,
+        start = start2, end = end2, cluster_id
+      )
     ) %>% dplyr::distinct()
 
     if (nrow(distal_raw_df) > 0) {
       final_cutoff_dist <- max(stats::quantile(
-        distal_raw_df$Total_Loops_Filtered, hub_percentile, na.rm = TRUE), 3)
+        distal_raw_df$Total_Loops_Filtered, hub_percentile,
+        na.rm = TRUE
+      ), 3)
       if (!is.null(upstream_distal_stats) &&
         "Distal_Anchor_ID" %in% colnames(upstream_distal_stats)) {
         temp_df <- upstream_distal_stats %>%
@@ -380,42 +457,56 @@ compute_refined_stats <- function(loop_df, upstream_promoter_stats,
             Total_Loops = dplyr::coalesce(Total_Loops_Filtered, 0),
             n_Linked_Distal = dplyr::coalesce(n_Linked_Distal_Filtered, 0),
             n_Linked_Promoters = dplyr::coalesce(
-              n_Linked_Promoters_Filtered, 0),
+              n_Linked_Promoters_Filtered, 0
+            ),
             Dominant_Interaction = dplyr::coalesce(
-              Dominant_Interaction_Filtered, "None"),
+              Dominant_Interaction_Filtered, "None"
+            ),
             Target_Genes = dplyr::coalesce(Target_Genes_Filtered, ""),
             Is_High_Connectivity_Distal_Element = dplyr::if_else(
-              Total_Loops >= final_cutoff_dist, "Yes", "No")
+              Total_Loops >= final_cutoff_dist, "Yes", "No"
+            )
           )
       } else {
         temp_df <- distal_raw_df %>%
-          dplyr::rename(Total_Loops = Total_Loops_Filtered,
+          dplyr::rename(
+            Total_Loops = Total_Loops_Filtered,
             n_Linked_Distal = n_Linked_Distal_Filtered,
             n_Linked_Promoters = n_Linked_Promoters_Filtered,
             Dominant_Interaction = Dominant_Interaction_Filtered,
-            Target_Genes = Target_Genes_Filtered) %>%
+            Target_Genes = Target_Genes_Filtered
+          ) %>%
           dplyr::mutate(
             Is_High_Connectivity_Distal_Element = dplyr::if_else(
-              Total_Loops >= final_cutoff_dist, "Yes", "No"))
+              Total_Loops >= final_cutoff_dist, "Yes", "No"
+            )
+          )
       }
       temp_df <- temp_df %>%
-        dplyr::select(-any_of(c("chr", "start", "end", "cluster_id",
+        dplyr::select(-any_of(c(
+          "chr", "start", "end", "cluster_id",
           "Distal_Type", "Distal_Type_Filtered", "Total_Loops_Filtered",
           "Target_Genes_Filtered", "n_Linked_Distal_Filtered",
-          "n_Linked_Promoters_Filtered", "Dominant_Interaction_Filtered")))
+          "n_Linked_Promoters_Filtered", "Dominant_Interaction_Filtered"
+        )))
       distal_element_df <- temp_df %>%
         dplyr::left_join(anchor_map,
-          by = c("Distal_Anchor_ID" = "anchor_id")) %>%
-        dplyr::select(chr, start, end, cluster_id, Total_Loops,
+          by = c("Distal_Anchor_ID" = "anchor_id")
+        ) %>%
+        dplyr::select(
+          chr, start, end, cluster_id, Total_Loops,
           n_Linked_Promoters, n_Linked_Distal, Dominant_Interaction,
-          any_of("Is_High_Connectivity_Distal_Element"), Target_Genes) %>%
+          any_of("Is_High_Connectivity_Distal_Element"), Target_Genes
+        ) %>%
         dplyr::filter(Total_Loops > 0) %>%
         dplyr::arrange(dplyr::desc(Total_Loops))
     }
   }
 
-  list(promoter_centric = promoter_centric_df,
-    distal_element = distal_element_df)
+  list(
+    promoter_centric = promoter_centric_df,
+    distal_element = distal_element_df
+  )
 }
 
 
@@ -519,10 +610,13 @@ draw_karyo_heatmap_internal <- function(gr_data, title_prefix, bin_size, sat_lev
     {
       GenomeInfoDb::seqlevelsStyle(gr_data) <- "UCSC"
     },
-    silent = TRUE)
+    silent = TRUE
+  )
 
   existing <- intersect(GenomeInfoDb::seqlevels(gr_data), standard_chroms)
-  if (length(existing) == 0) return(invisible(NULL))
+  if (length(existing) == 0) {
+    return(invisible(NULL))
+  }
 
   gr_data <- GenomeInfoDb::keepSeqlevels(gr_data, existing, pruning.mode = "coarse")
   GenomeInfoDb::seqlevels(gr_data) <- standard_chroms
@@ -1000,11 +1094,21 @@ draw_target_loop_donut <- function(loop_data, project_name, filename = NULL, col
 #' @keywords internal
 simplify_annotation <- function(x) {
   vapply(x, function(s) {
-    if (grepl("Promoter", s, ignore.case = TRUE)) return("Promoter")
-    if (grepl("Intron", s, ignore.case = TRUE)) return("Intron")
-    if (grepl("Exon", s, ignore.case = TRUE)) return("Exon")
-    if (grepl("Intergenic", s, ignore.case = TRUE)) return("Distal Intergenic")
-    if (grepl("Downstream", s, ignore.case = TRUE)) return("Downstream")
+    if (grepl("Promoter", s, ignore.case = TRUE)) {
+      return("Promoter")
+    }
+    if (grepl("Intron", s, ignore.case = TRUE)) {
+      return("Intron")
+    }
+    if (grepl("Exon", s, ignore.case = TRUE)) {
+      return("Exon")
+    }
+    if (grepl("Intergenic", s, ignore.case = TRUE)) {
+      return("Distal Intergenic")
+    }
+    if (grepl("Downstream", s, ignore.case = TRUE)) {
+      return("Downstream")
+    }
     return("Others")
   }, FUN.VALUE = character(1))
 }
@@ -1024,7 +1128,9 @@ simplify_annotation <- function(x) {
 #'   xlim scale_fill_brewer theme_void labs theme element_text
 #' @keywords internal
 draw_pie_with_outside_labels <- function(data_df, group_col, title, palette) {
-  if (is.null(data_df) || nrow(data_df) == 0) return(NULL)
+  if (is.null(data_df) || nrow(data_df) == 0) {
+    return(NULL)
+  }
 
   plot_data <- data_df
   plot_data$Simplified <- simplify_annotation(plot_data[[group_col]])
@@ -1038,7 +1144,9 @@ draw_pie_with_outside_labels <- function(data_df, group_col, title, palette) {
     ) %>%
     dplyr::arrange(dplyr::desc(Simplified))
 
-  if (nrow(stats) == 0) return(NULL)
+  if (nrow(stats) == 0) {
+    return(NULL)
+  }
 
   stats <- stats %>%
     dplyr::mutate(

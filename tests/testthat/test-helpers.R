@@ -36,10 +36,14 @@ test_that("load_expression_matrix loads and averages correctly", {
   expect_equal(vals[["TP53"]], 12.5)
 
   # error cases
-  expect_error(looplook:::load_expression_matrix("nonexistent.tsv", "con1"),
-    "not found")
-  expect_error(looplook:::load_expression_matrix(tmp, "badcol"),
-    "No valid sample columns")
+  expect_error(
+    looplook:::load_expression_matrix("nonexistent.tsv", "con1"),
+    "not found"
+  )
+  expect_error(
+    looplook:::load_expression_matrix(tmp, "badcol"),
+    "No valid sample columns"
+  )
 
   unlink(tmp)
 })
@@ -60,16 +64,21 @@ test_that("read_robust_general handles empty and short files", {
   expect_equal(nrow(res), 2)
   expect_equal(ncol(res), 3)
 
-  expect_error(looplook:::read_robust_general("", desc = "Test"),
-    "path is empty")
+  expect_error(
+    looplook:::read_robust_general("", desc = "Test"),
+    "path is empty"
+  )
   unlink(tmp)
 })
 
 test_that("resolve_gene_conflicts returns input unchanged when empty", {
-  df <- data.frame(chr = character(0), start = integer(0), end = integer(0),
-    stringsAsFactors = FALSE)
+  df <- data.frame(
+    chr = character(0), start = integer(0), end = integer(0),
+    stringsAsFactors = FALSE
+  )
   expect_equal(nrow(looplook:::resolve_gene_conflicts(
-    df, NULL, NULL, c(-2000, 2000), NULL)), 0)
+    df, NULL, NULL, c(-2000, 2000), NULL
+  )), 0)
 })
 
 test_that("clean_anchor filters and reclassifies correctly", {
