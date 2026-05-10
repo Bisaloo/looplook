@@ -460,3 +460,38 @@ test_that("build_refinement_plots skips refined karyotype plots if TxDb/OrgDb ar
   expect_false("Refined_Karyo_Active" %in% names(plots))
   expect_false("Refined_Karyo_TargetGenes" %in% names(plots))
 })
+
+
+# ── 18. profile_target_genes does not require OrgDb when GO is disabled ─────
+
+test_that("profile_target_genes runs without OrgDb if GO analysis is disabled", {
+  rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
+  expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
+  diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
+  meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
+  skip_if(rdata_path == "" || expr_path == "" || diff_path == "" || meta_path == "",
+    "example data not available")
+
+  tmp <- new.env()
+  load(rdata_path, envir = tmp)
+  res <- tmp[[ls(tmp)[1]]]
+
+  expect_no_error({
+    out <- suppressWarnings(suppressMessages(
+      profile_target_genes(
+        annotation_res = res,
+        diff_file = diff_path,
+        expr_matrix_file = expr_path,
+        metadata_file = meta_path,
+        target_source = "loops",
+        project_name = "no_orgdb_needed",
+        org_db = "definitelyNotAPackage",
+        run_go = FALSE,
+        run_ppi = FALSE,
+        run_motif = FALSE
+      )
+    ))
+    expect_type(out, "list")
+    expect_true("loops" %in% names(out))
+  })
+})

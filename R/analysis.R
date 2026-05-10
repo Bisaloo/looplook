@@ -104,8 +104,9 @@ profile_target_genes <- function(
 
   message(">>> Analysis Init | Root Project: ", root_project_name)
 
-  # 仅保留极其核心的跨平台依赖检查，去除泛滥的 requireNamespace
-  if (!requireNamespace(org_db, quietly = TRUE)) stop("Package ", org_db, " missing. Please install it.")
+  if (run_go && !requireNamespace(org_db, quietly = TRUE)) {
+    stop("Package ", org_db, " missing. Please install it.")
+  }
 
   if (run_motif) {
     bs_pkg <- switch(genome_id, "hg19" = "BSgenome.Hsapiens.UCSC.hg19", "hg38" = "BSgenome.Hsapiens.UCSC.hg38", "mm9" = "BSgenome.Mmusculus.UCSC.mm9", "mm10" = "BSgenome.Mmusculus.UCSC.mm10", NULL)
