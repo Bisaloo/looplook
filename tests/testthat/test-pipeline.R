@@ -7,6 +7,8 @@ test_that("Module 4: profile_target_genes exhaustive branching", {
   meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
   skip_if(rdata_path == "" || expr_path == "" || diff_path == "" || meta_path == "",
     "Test data not available")
+  skip_if_not_installed("org.Hs.eg.db")
+  skip_if_not_installed("clusterProfiler")
 
   temp_env <- new.env()
   load(rdata_path, envir = temp_env)
