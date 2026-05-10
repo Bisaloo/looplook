@@ -86,7 +86,7 @@ jobs:
           repos["CRAN"] <- "https://cloud.r-project.org"
           options(repos = repos)
           install.packages(
-            c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown"),
+            c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown", "testthat"),
             dependencies = c("Depends", "Imports", "LinkingTo")
           )
           BiocManager::install(
@@ -114,6 +114,7 @@ jobs:
           _R_CHECK_CRAN_INCOMING_: "false"
           _R_CHECK_CRAN_INCOMING_REMOTE_: "false"
           _R_CHECK_PACKAGES_USED_IGNORE_UNUSED_IMPORTS_: "false"
+          _R_CHECK_DONTTEST_EXAMPLES_: "false"
           NOT_CRAN: "true"
         shell: Rscript {0}
         run: |
