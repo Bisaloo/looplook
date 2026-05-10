@@ -695,7 +695,9 @@ The function provides fine-grained control over genomic locus selection, data fi
 - **`save_file`**: Character (Optional). Specifies the output file path and format (e.g., `".pdf"`) for exporting the final ggplot object.
 
 ```{r visual_track}
-if (requireNamespace("ggplot2", quietly = TRUE)) {
+if (requireNamespace("ggplot2", quietly = TRUE) &&
+  requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
+  requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
   # If 'from' and 'to' are omitted, it automatically detects the densest viewport.
   track_plot <- plot_peaks_interactions(
     bedpe_file = f1,

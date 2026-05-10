@@ -75,15 +75,18 @@ and annotated genes. Loop arcs can be colored or sized by interaction score
 (7th column in BEDPE).
 }
 \examples{
-bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-p <- plot_peaks_interactions(
-  bedpe_file = bedpe_path,
-  target_bed = bed_path,
-  chr = "chr1",
-  from = 11884299,
-  to   = 12106581,
-  species = "hg38"
-)
-print(p)
+if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
+  requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+  bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
+  bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
+  p <- plot_peaks_interactions(
+    bedpe_file = bedpe_path,
+    target_bed = bed_path,
+    chr = "chr1",
+    from = 11884299,
+    to   = 12106581,
+    species = "hg38"
+  )
+  print(p)
+}
 }

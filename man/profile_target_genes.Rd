@@ -117,7 +117,7 @@ profile_target_genes(
   diff_file  = diff_path,
   expr_matrix_file = expr_path,
   metadata_file = meta_path,
-  run_go  = TRUE,
+  run_go  = FALSE,
   run_ppi = FALSE
 )
 }
