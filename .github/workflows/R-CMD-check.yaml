@@ -21,7 +21,7 @@ jobs:
         config:
           - {os: macos-latest,   r: 'release'}
           - {os: windows-latest, r: 'release'}
-          - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}
+          # - {os: ubuntu-latest,   r: 'devel', http-user-agent: 'release'}  # Bioc devel often missing packages
           - {os: ubuntu-latest,   r: 'release'}
           #- {os: ubuntu-latest,   r: 'oldrel-1'}
 
@@ -90,18 +90,23 @@ jobs:
             dependencies = c("Depends", "Imports", "LinkingTo")
           )
           BiocManager::install(
-            c("BiocStyle", "karyoploteR", "ChIPseeker"),
+            c("BiocStyle", "ChIPseeker"),
             ask = FALSE,
             update = FALSE
+          )
+          tryCatch(
+            BiocManager::install("karyoploteR", ask = FALSE, update = FALSE),
+            error = function(e) warning("karyoploteR not available: ", e$message)
           )
           stopifnot(
             requireNamespace("rcmdcheck", quietly = TRUE),
             requireNamespace("knitr", quietly = TRUE),
             requireNamespace("rmarkdown", quietly = TRUE),
             requireNamespace("BiocStyle", quietly = TRUE),
-            requireNamespace("karyoploteR", quietly = TRUE),
             requireNamespace("ChIPseeker", quietly = TRUE)
           )
+          if (!requireNamespace("karyoploteR", quietly = TRUE))
+            warning("karyoploteR not available; karyotype plots will be skipped")
           remotes::install_deps(
             dependencies = c("Depends", "Imports", "LinkingTo"),
             upgrade = "never"
