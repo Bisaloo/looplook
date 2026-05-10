@@ -77,14 +77,21 @@ jobs:
           repos["CRAN"] <- "https://cloud.r-project.org"
           options(repos = repos)
           install.packages(
-            c("remotes", "pkgdown", "knitr", "rmarkdown", "ragg"),
+            c("remotes", "pkgdown", "knitr", "rmarkdown", "ragg", "RSQLite"),
             dependencies = c("Depends", "Imports", "LinkingTo")
           )
-          BiocManager::install(
-            c("BiocStyle", "karyoploteR", "ChIPseeker"),
-            ask = FALSE,
-            update = FALSE
-          )
+          ensure_bioc <- function(pkgs, force = FALSE) {
+            BiocManager::install(pkgs, ask = FALSE, update = FALSE, force = force)
+            missing <- pkgs[!vapply(pkgs, function(pkg) requireNamespace(pkg, quietly = TRUE), logical(1))]
+            if (!length(missing)) return(invisible(TRUE))
+            BiocManager::install(missing, ask = FALSE, update = FALSE, force = TRUE)
+            missing <- missing[!vapply(missing, function(pkg) requireNamespace(pkg, quietly = TRUE), logical(1))]
+            if (length(missing)) {
+              stop("Failed to install/load: ", paste(missing, collapse = ", "))
+            }
+          }
+          ensure_bioc(c("AnnotationDbi", "GO.db", "GOSemSim"), force = TRUE)
+          ensure_bioc(c("BiocStyle", "karyoploteR", "ChIPseeker"))
           stopifnot(
             requireNamespace("pkgdown", quietly = TRUE),
             requireNamespace("ragg", quietly = TRUE),

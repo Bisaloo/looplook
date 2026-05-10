@@ -86,18 +86,45 @@ jobs:
           repos["CRAN"] <- "https://cloud.r-project.org"
           options(repos = repos)
           install.packages(
-            c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown", "testthat"),
+            c("remotes", "rcmdcheck", "sessioninfo", "knitr", "rmarkdown", "testthat", "RSQLite"),
             dependencies = c("Depends", "Imports", "LinkingTo")
           )
-          BiocManager::install(
-            c("BiocStyle", "ChIPseeker"),
-            ask = FALSE,
-            update = FALSE
-          )
-          tryCatch(
-            BiocManager::install("karyoploteR", ask = FALSE, update = FALSE),
-            error = function(e) warning("karyoploteR not available: ", e$message)
-          )
+          ensure_bioc <- function(pkgs, optional = FALSE, force = FALSE) {
+            tryCatch(
+              BiocManager::install(pkgs, ask = FALSE, update = FALSE, force = force),
+              error = function(e) {
+                if (optional) {
+                  warning(paste(pkgs, collapse = ", "), " not available: ", e$message)
+                } else {
+                  stop(e)
+                }
+              }
+            )
+            missing <- pkgs[!vapply(pkgs, function(pkg) requireNamespace(pkg, quietly = TRUE), logical(1))]
+            if (!length(missing)) return(invisible(TRUE))
+            tryCatch(
+              BiocManager::install(missing, ask = FALSE, update = FALSE, force = TRUE),
+              error = function(e) {
+                if (optional) {
+                  warning(paste(missing, collapse = ", "), " not available after retry: ", e$message)
+                } else {
+                  stop(e)
+                }
+              }
+            )
+            missing <- missing[!vapply(missing, function(pkg) requireNamespace(pkg, quietly = TRUE), logical(1))]
+            if (length(missing)) {
+              msg <- paste("Failed to install/load:", paste(missing, collapse = ", "))
+              if (optional) {
+                warning(msg)
+              } else {
+                stop(msg)
+              }
+            }
+          }
+          ensure_bioc(c("AnnotationDbi", "GO.db", "GOSemSim"), force = TRUE)
+          ensure_bioc(c("BiocStyle", "ChIPseeker"))
+          ensure_bioc("karyoploteR", optional = TRUE)
           stopifnot(
             requireNamespace("rcmdcheck", quietly = TRUE),
             requireNamespace("knitr", quietly = TRUE),
