@@ -55,10 +55,16 @@ bedpe_to_gi <- function(bedpe_file) {
   }
 
   # BEDPE is 0-based half-open; GRanges expects 1-based closed
-  gr1 <- GenomicRanges::GRanges(df[, 1], IRanges::IRanges(df[, 2] + 1, df[, 3]))
-  gr2 <- GenomicRanges::GRanges(df[, 4], IRanges::IRanges(df[, 5] + 1, df[, 6]))
+  gr1 <- .with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(df[, 1], IRanges::IRanges(df[, 2] + 1, df[, 3]))
+  )
+  gr2 <- .with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(df[, 4], IRanges::IRanges(df[, 5] + 1, df[, 6]))
+  )
 
-  gi <- InteractionSet::GInteractions(gr1, gr2, mode = "strict")
+  gi <- .with_known_upstream_noise_suppressed(
+    InteractionSet::GInteractions(gr1, gr2, mode = "strict")
+  )
 
   final_scores <- rep(0, nrow(df))
   found <- FALSE
@@ -159,7 +165,9 @@ read_simple_bed <- function(bed_file) {
 
   df <- data.table::fread(bed_file, header = FALSE, select = c(1, 2, 3))
   # BED is 0-based half-open; GRanges expects 1-based closed
-  GenomicRanges::GRanges(df$V1, IRanges::IRanges(df$V2 + 1, df$V3))
+  .with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(df$V1, IRanges::IRanges(df$V2 + 1, df$V3))
+  )
 }
 
 
@@ -182,7 +190,8 @@ read_simple_bed <- function(bed_file) {
 #' It also supports a \strong{two-stage filtering strategy} to maximize signal-to-noise ratio:
 #' \itemize{
 #'   \item \strong{Pre-filtering} (\code{min_raw_score}): Removes low-confidence noise (e.g., singleton reads) from raw files \emph{before} merging.
-#'   \item \strong{Post-filtering} (\code{min_score}): Filters the final consensus loops based on their aggregated score (e.g., average intensity).
+#'   \item \strong{Post-filtering} (\code{min_score}): Filters the final consensus loops based on their aggregated score.
+#'   \item \strong{Replicate-Balanced Aggregation}: In \code{"consensus"} and \code{"union"} modes, each cluster score is computed as the mean of per-source mean scores, so one replicate with many fragmented calls cannot dominate the final representative score.
 #' }
 #'
 #' @param files Character vector. Paths to BEDPE files (at least two).
@@ -208,13 +217,16 @@ read_simple_bed <- function(bed_file) {
 #'   }
 #' @param min_score Numeric. \strong{Post-filtering threshold}. Minimum score to keep a consolidated loop \strong{after} merging.
 #'   \itemize{
-#'     \item For \code{"consensus"} mode, this filters the consensus loops based on their representative score.
+#'     \item For \code{"consensus"} and \code{"union"} modes, this filters loops based on a replicate-balanced representative score (mean of per-source cluster means).
+#'     \item For \code{"intersect"} mode, this filters the retained File 1 loops by their original score.
 #'     \item Default: \code{NULL} (no post-filtering).
 #'   }
 #' @param blacklist_species Character. Species/build for built-in blacklist
 #'   (e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.
 #' @param region_of_interest Character. Path to BED file. Only loops overlapping these regions will be kept.
 #' @param out_file Character. The file name (including the file path) for saving results in the extended BEDPE format.
+#' @param write_output Logical. If \code{TRUE} (default), write the consolidated BEDPE file when \code{out_file} is provided. If \code{FALSE}, return the \code{GInteractions} object without creating directories or files.
+#' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
 #' @return A filtered \code{\link[InteractionSet]{GInteractions}} object.
 #' @importFrom data.table fread
 #' @importFrom GenomicRanges GRanges seqnames start end
@@ -280,13 +292,19 @@ consolidate_chromatin_loops <- function(
   min_score = NULL,
   blacklist_species = NULL,
   region_of_interest = NULL,
-  out_file = NULL
+  out_file = NULL,
+  write_output = TRUE,
+  quiet = FALSE
 ) {
+  log_message <- function(...) {
+    if (!quiet) message(...)
+  }
+
   stopifnot(length(files) >= 2)
   mode <- match.arg(mode)
   n_reps <- length(files)
 
-  message(">>> Reading BEDPE files")
+  log_message(">>> Reading BEDPE files")
 
   gi_list <- lapply(files, function(f) {
     gi <- bedpe_to_gi(f)
@@ -302,7 +320,7 @@ consolidate_chromatin_loops <- function(
 
   for (i in seq_along(gi_list)) {
     S4Vectors::mcols(gi_list[[i]])$source <- i
-    message("    File ", i, ": ", length(gi_list[[i]]), " loops")
+    log_message("    File ", i, ": ", length(gi_list[[i]]), " loops")
   }
 
   result_gi <- NULL
@@ -311,14 +329,14 @@ consolidate_chromatin_loops <- function(
   # PATH A: STRICT INTERSECT (No Clustering)
   # ==========================================
   if (mode == "intersect") {
-    message(">>> Intersect mode: Reference-based filtering (No Coordinate Merging)")
-    message("    Base: File 1. Criterion: Must overlap with ALL other files.")
+    log_message(">>> Intersect mode: Reference-based filtering (No Coordinate Merging)")
+    log_message("    Base: File 1. Criterion: Must overlap with ALL other files.")
 
     current_gi <- gi_list[[1]]
 
     for (i in 2:n_reps) {
       if (length(current_gi) == 0) break
-      message("    Intersecting with File ", i, "...")
+      log_message("    Intersecting with File ", i, "...")
 
       hits <- InteractionSet::findOverlaps(
         current_gi,
@@ -340,7 +358,7 @@ consolidate_chromatin_loops <- function(
     # ==========================================
   } else {
     #
-    message(">>> Clustering mode (Union/Consensus): Merging coordinates via Graph")
+    log_message(">>> Clustering mode (Union/Consensus): Merging coordinates via Graph")
 
     combined_dt <- data.table::rbindlist(lapply(gi_list, gi_to_dt))
     clustered <- cluster_loops_dt(combined_dt, gap)
@@ -355,10 +373,10 @@ consolidate_chromatin_loops <- function(
           min_consensus <- floor(0.75 * n_reps) + 1
         }
       }
-      message(">>> Consensus mode: Keeping clusters in >= ", min_consensus, " replicates")
+      log_message(">>> Consensus mode: Keeping clusters in >= ", min_consensus, " replicates")
       reduced_dt <- reduced_dt[n_reps >= min_consensus]
     } else {
-      message(">>> Union mode: Keeping all clusters")
+      log_message(">>> Union mode: Keeping all clusters")
     }
 
     result_gi <- dt_to_gi(reduced_dt)
@@ -388,7 +406,7 @@ consolidate_chromatin_loops <- function(
       blacklist_path <- blacklist_species
     }
     if (file.exists(blacklist_path)) {
-      message(">>> Filtering blacklist: ", basename(blacklist_path))
+      log_message(">>> Filtering blacklist: ", basename(blacklist_path))
       bl <- read_simple_bed(blacklist_path)
       h1 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "first"), bl)
       h2 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "second"), bl)
@@ -400,7 +418,7 @@ consolidate_chromatin_loops <- function(
   }
 
   if (!is.null(region_of_interest)) {
-    message(">>> Filtering by region of interest: ", basename(region_of_interest))
+    log_message(">>> Filtering by region of interest: ", basename(region_of_interest))
     if (file.exists(region_of_interest)) {
       tg <- read_simple_bed(region_of_interest)
 
@@ -411,9 +429,9 @@ consolidate_chromatin_loops <- function(
 
       if (length(keep) > 0) {
         result_gi <- result_gi[keep]
-        message("    Kept ", length(result_gi), " loops overlapping ROI.")
+        log_message("    Kept ", length(result_gi), " loops overlapping ROI.")
       } else {
-        message("    No loops overlapped with the ROI. Returning empty set.")
+        log_message("    No loops overlapped with the ROI. Returning empty set.")
         result_gi <- result_gi[0]
       }
     } else {
@@ -421,7 +439,7 @@ consolidate_chromatin_loops <- function(
     }
   }
 
-  if (!is.null(out_file)) {
+  if (write_output && !is.null(out_file)) {
     a1 <- InteractionSet::anchors(result_gi, "first")
     a2 <- InteractionSet::anchors(result_gi, "second")
 
@@ -450,10 +468,10 @@ consolidate_chromatin_loops <- function(
       sep = "\t",
       row.names = FALSE, col.names = FALSE, quote = FALSE
     )
-    message("Finished! Saved to ", out_file)
+    log_message("Finished! Saved to ", out_file)
   }
 
-  message("Finished! Final loops: ", length(result_gi))
+  log_message("Finished! Final loops: ", length(result_gi))
   result_gi
 }
 
@@ -485,28 +503,60 @@ gi_to_dt <- function(gi) {
 }
 
 reduce_clusters_dt <- function(dt) {
-  dt[, list(
+  cluster_coords <- dt[, list(
     chr1 = chr1[1],
     start1 = min(start1),
     end1 = max(end1),
     chr2 = chr2[1],
     start2 = min(start2),
     end2 = max(end2),
-    score = mean(score, na.rm = TRUE),
-    n_members = .N,
-    n_reps = data.table::uniqueN(source)
+    n_members = .N
   ), by = cluster]
+
+  cluster_scores <- dt[, .(
+    score = .mean_or_na(score)
+  ), by = .(cluster, source)][, .(
+    score = .mean_or_na(score),
+    n_reps = .N
+  ), by = cluster]
+
+  reduced_dt <- merge(
+    cluster_coords,
+    cluster_scores,
+    by = "cluster",
+    all.x = TRUE,
+    sort = FALSE
+  )
+  data.table::setcolorder(reduced_dt, c(
+    "cluster", "chr1", "start1", "end1", "chr2", "start2", "end2",
+    "score", "n_members", "n_reps"
+  ))
+  reduced_dt
+}
+
+.mean_or_na <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0) {
+    return(NA_real_)
+  }
+  mean(x)
 }
 
 dt_to_gi <- function(dt) {
-  gr1 <- GenomicRanges::GRanges(
-    dt$chr1, IRanges::IRanges(dt$start1, dt$end1)
+  gr1 <- .with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(
+      dt$chr1, IRanges::IRanges(dt$start1, dt$end1)
+    )
   )
-  gr2 <- GenomicRanges::GRanges(
-    dt$chr2, IRanges::IRanges(dt$start2, dt$end2)
+  gr2 <- .with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(
+      dt$chr2, IRanges::IRanges(dt$start2, dt$end2)
+    )
   )
 
-  gi <- InteractionSet::GInteractions(gr1, gr2, mode = "strict")
+  gi <- .with_known_upstream_noise_suppressed(
+    InteractionSet::GInteractions(gr1, gr2, mode = "strict")
+  )
   S4Vectors::mcols(gi)$cluster_id <- dt$cluster
   S4Vectors::mcols(gi)$n_members <- dt$n_members
   S4Vectors::mcols(gi)$score <- dt$score

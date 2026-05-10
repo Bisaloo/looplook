@@ -1,5 +1,5 @@
 SampleID Group
 con1 con
-con1 con
+con2 con
 trt1 trt
 trt2 trt

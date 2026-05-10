@@ -5,7 +5,7 @@
 \title{Render a Publication-Ready 3D Annotation Report}
 \usage{
 looplook_report(
-  bedpe_file,
+  bedpe_file = NULL,
   target_bed = NULL,
   expr_matrix_file = NULL,
   sample_columns = NULL,
@@ -137,17 +137,29 @@ interpretation-ready HTML document suitable for sharing with collaborators.
 }
 \details{
 The profiling stage uses R's random number generator for GSEA gene-set
-down-sampling (\code{gsea_nSample}) and motif background sampling. Call
+down-sampling (\code{gsea_nSample}) and motif background anchor sampling. Call
 \code{set.seed()} before \code{looplook_report()} for fully reproducible
 results.
 }
 \examples{
-\donttest{
-looplook_report(
-  bedpe_file   = system.file("extdata", "example_loops_1.bedpe", package = "looplook"),
-  target_bed   = system.file("extdata", "example_peaks.bed", package = "looplook"),
-  project_name = "My Study",
-  out_dir      = tempdir()
-)
+if (requireNamespace("rmarkdown", quietly = TRUE) &&
+  requireNamespace("knitr", quietly = TRUE)) {
+  report_path <- looplook_report(
+    precomputed_res = system.file("extdata", "analysis_results.RData", package = "looplook"),
+    expr_matrix_file = system.file("extdata", "example_tpm.txt", package = "looplook"),
+    diff_file = system.file("extdata", "example_deg.txt", package = "looplook"),
+    metadata_file = system.file("extdata", "example_coldata.txt", package = "looplook"),
+    project_name = "Example",
+    out_dir = tempdir(),
+    output_file = "looplook-example-report.html",
+    quiet = TRUE,
+    run_go = FALSE,
+    run_ppi = FALSE,
+    run_motif = FALSE,
+    heatmap_nSample = 20,
+    gsea_nSample = 20,
+    cnet_nSample = 5
+  )
+  file.exists(report_path)
 }
 }

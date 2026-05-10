@@ -18,7 +18,9 @@ annotate_peaks_and_loops(
   color_palette = "Set2",
   karyo_bin_size = 1e+05,
   neighbor_hop = 0,
-  hub_percentile = 0.95
+  hub_percentile = 0.95,
+  write_output = TRUE,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -49,18 +51,24 @@ annotate_peaks_and_loops(
 \item{neighbor_hop}{Integer. k-hop ego-network expansion order via \code{igraph::ego()}. \code{0} restricts to direct contacts. Default: \code{0}.}
 
 \item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
+
+\item{write_output}{Logical. If \code{TRUE} (default), write the Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
+
+\item{quiet}{Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.}
 }
 \value{
 An invisible named list:
 \itemize{
 \item \code{target_annotation} — Peak-to-gene assignments with \code{Assigned_Target_Genes_Filled} (3D-prioritised, falling back to nearest gene).
 \item \code{loop_annotation} — Annotated 3D interactome with \code{Putative_Target_Genes}.
-\item \code{anchor_annotation} — Anchor-level genomic classifications.
+\item \code{anchor_loci_annotation} — Non-redundant anchor-locus genomic classifications after within-cluster interval reduction.
+\item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
 \item \code{promoter_centric_stats} — Gene-level connectivity statistics.
 \item \code{distal_element_stats} — Distal-element connectivity statistics.
-\item \code{plot_list} — Named list of ggplot objects (donut, karyotype, rose, flower).
+\item \code{plots} — Named list of ggplot objects (donut, karyotype, rose, flower).
+\item \code{plot_list} — Backward-compatible alias of \code{plots}.
 }
-Also writes a multi-sheet Excel workbook to \code{out_dir}.
+If \code{write_output = TRUE}, also writes a multi-sheet Excel workbook to \code{out_dir}.
 }
 \description{
 A dual-purpose analytical framework designed to integrate 1D genomic features with 3D chromatin architecture.

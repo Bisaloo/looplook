@@ -98,13 +98,12 @@ protein-protein interaction (PPI) network construction.
 }
 \details{
 Two analysis steps use R's random number generator: GSEA target-gene down-sampling
-(controlled by \code{gsea_nSample}) and motif background loop sampling (limited to
-2 000 background regions). For fully reproducible results, call \code{set.seed()}
+(controlled by \code{gsea_nSample}) and motif background anchor sampling (class-matched,
+limited to 2 000 background regions per contrast). For fully reproducible results, call \code{set.seed()}
 before running this function. The \code{clusterProfiler::GSEA} call internally
 uses \code{seed = TRUE} and is not affected by the global RNG state.
 }
 \examples{
-\donttest{
 rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
 diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
 expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
@@ -112,14 +111,18 @@ meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
 tmp <- new.env()
 load(rdata_path, envir = tmp)
 res <- tmp[[ls(tmp)[1]]]
-profile_target_genes(
+profile_res <- profile_target_genes(
   annotation_res = res,
   diff_file = diff_path,
   expr_matrix_file = expr_path,
   metadata_file = meta_path,
   run_go = FALSE,
-  run_ppi = FALSE
+  run_ppi = FALSE,
+  run_motif = FALSE,
+  heatmap_nSample = 20,
+  gsea_nSample = 20,
+  cnet_nSample = 5
 )
-}
+names(profile_res)
 
 }

@@ -66,7 +66,7 @@ test_that("run_heatmap_and_connectivity handles distal-only mode with mock data"
   skip_if_not_installed("viridis")
 
   genes <- paste0("Gene", 1:30)
-  tpm_mat <- as.data.frame(matrix(rnorm(30 * 4), 30, 4,
+  tpm_mat <- as.data.frame(matrix(rexp(30 * 4, rate = 1), 30, 4,
     dimnames = list(genes, c("s1", "s2", "s3", "s4"))
   ))
   meta_raw <- data.frame(
@@ -103,4 +103,44 @@ test_that(".annotate_motif_families handles empty input", {
     )
   )
   expect_equal(nrow(res_no_rows), 0)
+})
+
+test_that(".subset_motif_loop_df restricts motif universe for loop-derived tasks", {
+  loop_df <- data.frame(
+    loop_type = c("E-P", "P-P", "E-P", "G-P"),
+    stringsAsFactors = FALSE
+  )
+
+  ep_only <- looplook:::.subset_motif_loop_df(loop_df, src = "loops", task_name = "EP_Genes")
+  expect_equal(nrow(ep_only), 2)
+  expect_true(all(ep_only$loop_type == "E-P"))
+
+  unchanged_targets <- looplook:::.subset_motif_loop_df(loop_df, src = "targets", task_name = "Target_Genes")
+  expect_equal(nrow(unchanged_targets), nrow(loop_df))
+})
+
+test_that(".prepare_motif_anchor_sets deduplicates anchors and matches classes", {
+  loop_df <- data.frame(
+    chr1 = rep("chr1", 6),
+    start1 = c(100, 100, 100, 700, 900, 1100),
+    end1 = c(150, 150, 150, 750, 950, 1150),
+    chr2 = rep("chr1", 6),
+    start2 = c(300, 500, 650, 1300, 1500, 1700),
+    end2 = c(350, 550, 700, 1350, 1550, 1750),
+    a1_id = c("A", "A", "A", "E", "G", "I"),
+    a2_id = c("B", "C", "D", "F", "H", "J"),
+    anchor1_gene = c("TP53", "TP53", "TP53", "CTRL1", "CTRL2", "CTRL3"),
+    anchor1_type = c("P", "P", "P", "P", "P", "P"),
+    anchor2_gene = c("EnhA", "EnhB", "PartnerProm", "BgEnh", "GeneBody", "SilentProm"),
+    anchor2_type = c("E", "eP", "P", "E", "G", "eG"),
+    stringsAsFactors = FALSE
+  )
+
+  motif_sets <- looplook:::.prepare_motif_anchor_sets(loop_df, target_genes = "TP53")
+
+  expect_equal(motif_sets$target_loop_n, 3)
+  expect_equal(sort(names(motif_sets$proximal_fg)), "A")
+  expect_equal(sort(names(motif_sets$distal_fg)), c("B", "C"))
+  expect_equal(sort(names(motif_sets$proximal_bg)), c("E", "G", "I"))
+  expect_equal(sort(names(motif_sets$distal_bg)), c("F", "J"))
 })

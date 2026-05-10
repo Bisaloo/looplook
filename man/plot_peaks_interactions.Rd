@@ -39,8 +39,10 @@ the most frequent chromosome in the BEDPE.}
 
 \item{species}{Character. Genome assembly: "hg38", "hg19", "mm10", or "mm9".}
 
-\item{max_levels}{Integer. Maximum number of vertical levels for arc stacking
-(default: 10).}
+\item{max_levels}{Integer. Maximum number of visible vertical levels for loop
+arc stacking (default: 10). Overlapping loops are separated into stacked
+bands up to this limit; denser regions are compressed into the available
+height while preserving relative layering.}
 
 \item{base_anchor_height}{Numeric. Height of anchor rectangles (default: 0.05).}
 

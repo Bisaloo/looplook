@@ -9,7 +9,9 @@
 #' @param from Start coordinate.
 #' @param to End coordinate.
 #' @param species Genome assembly.
-#' @param max_levels Max arc stacking levels.
+#' @param max_levels Maximum visible arc stacking levels. Overlapping loops are
+#'   assigned to distinct vertical bands up to this cap; denser regions are
+#'   compressed into the available height while preserving relative layering.
 #' @param base_anchor_height Anchor rectangle height.
 #' @param loop_color Default arc colour.
 #' @param anchor_color Default anchor colour.
@@ -23,6 +25,68 @@ prepare_track_data <- function(
   max_levels, base_anchor_height, loop_color, anchor_color, score_to_alpha,
   min_score
 ) {
+  .scale_group_positions <- function(values, groups) {
+    out <- numeric(length(values))
+    idx_split <- split(seq_along(values), groups)
+    for (idx in idx_split) {
+      if (length(idx) == 1) {
+        out[idx] <- 0.5
+      } else {
+        out[idx] <- scales::rescale(rank(values[idx], ties.method = "first"), to = c(0, 1))
+      }
+    }
+    out
+  }
+
+  .assign_arc_levels <- function(left, right, max_levels) {
+    n <- length(left)
+    if (n == 0) {
+      return(data.frame(
+        raw_level = integer(0),
+        display_level = integer(0),
+        band_pos = numeric(0),
+        stringsAsFactors = FALSE
+      ))
+    }
+
+    left <- as.numeric(left)
+    right <- as.numeric(right)
+    span <- pmax(right - left, 1)
+    max_levels <- max(1L, as.integer(max_levels[1]))
+
+    raw_level <- integer(n)
+    level_right_edge <- numeric(0)
+    ord <- order(left, right)
+    for (idx in ord) {
+      reusable <- which(level_right_edge <= left[idx])
+      if (length(reusable) == 0) {
+        level_right_edge <- c(level_right_edge, right[idx])
+        raw_level[idx] <- length(level_right_edge)
+      } else {
+        use_level <- reusable[1]
+        raw_level[idx] <- use_level
+        level_right_edge[use_level] <- right[idx]
+      }
+    }
+
+    raw_max <- max(raw_level)
+    compressed <- raw_max > max_levels
+    display_level <- if (compressed) {
+      ceiling(raw_level / raw_max * max_levels)
+    } else {
+      raw_level
+    }
+    band_values <- if (compressed) raw_level else span
+    band_pos <- .scale_group_positions(band_values, display_level)
+
+    data.frame(
+      raw_level = raw_level,
+      display_level = display_level,
+      band_pos = band_pos,
+      stringsAsFactors = FALSE
+    )
+  }
+
   # Species config
   species_map <- list(
     hg38 = c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"),
@@ -124,9 +188,22 @@ prepare_track_data <- function(
     loops_calc <- loops_view %>%
       dplyr::mutate(
         mid1 = (start1 + end1) / 2, mid2 = (start2 + end2) / 2,
-        loop_i = dplyr::row_number(), center = (mid1 + mid2) / 2,
-        peak = anchor_ymax + (max_levels * 0.1) + 0.1
+        left_mid = pmin(mid1, mid2), right_mid = pmax(mid1, mid2)
+      ) %>%
+      dplyr::mutate(
+        span = pmax(.data$right_mid - .data$left_mid, 1),
+        loop_i = dplyr::row_number(), center = (mid1 + mid2) / 2
       )
+    level_df <- .assign_arc_levels(loops_calc$left_mid, loops_calc$right_mid, max_levels)
+    loops_calc <- cbind(loops_calc, level_df)
+
+    peak_base <- anchor_ymax + 0.08
+    level_band <- 0.11
+    band_height <- 0.045
+    loops_calc$peak <- peak_base +
+      (loops_calc$display_level - 1) * level_band +
+      loops_calc$band_pos * band_height
+    loops_calc <- loops_calc[order(loops_calc$peak, loops_calc$span), , drop = FALSE]
 
     bez_list <- lapply(seq_len(nrow(loops_calc)), function(i) {
       d <- loops_calc[i, ]
@@ -134,11 +211,12 @@ prepare_track_data <- function(
         loop_i = d$loop_i,
         x = c(d$mid1, d$center, d$mid2),
         y = c(anchor_ymax, d$peak, anchor_ymax),
+        arc_level = d$display_level,
         score = if (has_score) d$score else 1, stringsAsFactors = FALSE
       )
     })
     bez_df <- do.call(rbind, bez_list)
-    plot_ymax <- max(bez_df$y) * 1.05
+    plot_ymax <- max(bez_df$y) + 0.08
 
     calc_alpha_color <- function(scores, base_col, use_alpha) {
       if (anyNA(scores)) scores[is.na(scores)] <- min(scores, na.rm = TRUE)
@@ -171,26 +249,23 @@ prepare_track_data <- function(
   }
 
   # Gene annotation
-  genes_gr <- GenomicFeatures::genes(txdb)
+  genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb))
   genes_df <- as.data.frame(genes_gr) %>%
     dplyr::filter(as.character(seqnames) == chr, end > from, start < to)
 
   feature_df <- data.frame()
   if (nrow(genes_df) > 0) {
-    org_db <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
     try(
       {
-        valid_keys <- AnnotationDbi::keytypes(org_db)
-        primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
-
-        symbol_map <- AnnotationDbi::select(org_db,
-          keys = unique(as.character(genes_df$gene_id)),
-          columns = "SYMBOL", keytype = primary_key
+        symbol_map <- .map_txdb_gene_ids(
+          gene_ids = unique(as.character(genes_df$gene_id)),
+          org_db = org_db_pkg,
+          columns = "SYMBOL",
+          context = "prepare_genomic_plot_data gene track",
+          warn = TRUE
         )
-        symbol_map <- symbol_map[!duplicated(symbol_map[[primary_key]]), ]
-
-        join_by_args <- setNames(primary_key, "gene_id")
-        genes_df <- dplyr::left_join(genes_df, symbol_map, by = join_by_args)
+        symbol_map <- symbol_map[!duplicated(symbol_map$gene_id), ]
+        genes_df <- dplyr::left_join(genes_df, symbol_map, by = "gene_id")
       },
       silent = TRUE
     )
@@ -268,8 +343,10 @@ prepare_track_data <- function(
 #' @param from Numeric. Start coordinate of the region to plot.
 #' @param to Numeric. End coordinate of the region to plot.
 #' @param species Character. Genome assembly: "hg38", "hg19", "mm10", or "mm9".
-#' @param max_levels Integer. Maximum number of vertical levels for arc stacking
-#'   (default: 10).
+#' @param max_levels Integer. Maximum number of visible vertical levels for loop
+#'   arc stacking (default: 10). Overlapping loops are separated into stacked
+#'   bands up to this limit; denser regions are compressed into the available
+#'   height while preserving relative layering.
 #' @param base_anchor_height Numeric. Height of anchor rectangles (default: 0.05).
 #' @param loop_color Character. Default color for arcs when no score is provided
 #'   (default: "#5D6D7E").
@@ -617,18 +694,20 @@ draw_upset_intersections <- function(gene_lists, project_name = "UpSet Plot", gr
 
   upset_grob <- tryCatch(
     {
-      grid::grid.grabExpr({
-        UpSetR::upset(
-          input_data,
-          nsets = length(gene_lists),
-          nintersects = 40,
-          mb.ratio = c(0.55, 0.45),
-          order.by = "freq",
-          mainbar.y.label = "Gene Intersection Size",
-          sets.x.label = "Set Size",
-          text.scale = c(1.3, 1.3, 1, 1, 1.3, 1)
-        )
-      })
+      .with_known_upstream_noise_suppressed(
+        grid::grid.grabExpr({
+          UpSetR::upset(
+            input_data,
+            nsets = length(gene_lists),
+            nintersects = 40,
+            mb.ratio = c(0.55, 0.45),
+            order.by = "freq",
+            mainbar.y.label = "Gene Intersection Size",
+            sets.x.label = "Set Size",
+            text.scale = c(1.3, 1.3, 1, 1, 1.3, 1)
+          )
+        })
+      )
     },
     error = function(e) {
       warning("UpSetR plotting failed: ", e$message)

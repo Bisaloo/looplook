@@ -140,12 +140,12 @@ test_that("same BEDPE gives consistent anchor coords in gi and annotation", {
   gi <- looplook:::bedpe_to_gi(tmp_bedpe)
   a1_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "first"))
   a2_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "second"))
-  res <- annotate_peaks_and_loops(
+  res <- suppressWarnings(annotate_peaks_and_loops(
     bedpe_file = tmp_bedpe,
     species = "hg38",
     out_dir = tempdir(),
     project_name = "coord_test"
-  )
+  ))
   la <- res$loop_annotation
   expect_true(all(la$start1 >= 1))
   expect_true(all(la$start2 >= 1))
@@ -199,10 +199,10 @@ test_that("resolve_gene_conflicts handles no matching genes", {
   txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
   # Region in a gene desert (no promoters nearby)
   df <- data.frame(chr = "chr1", start = 1, end = 100, stringsAsFactors = FALSE)
-  res <- looplook:::resolve_gene_conflicts(
+  res <- suppressWarnings(looplook:::resolve_gene_conflicts(
     df, txdb,
     "org.Hs.eg.db", c(-2000, 2000), NULL
-  )
+  ))
   expect_s3_class(res, "data.frame")
   expect_true(nrow(res) >= 1)
 })
@@ -213,6 +213,14 @@ test_that("resolve_gene_conflicts handles no matching genes", {
 test_that("profile_target_genes lfc_col defaults to log2FoldChange", {
   frmls <- formals(looplook::profile_target_genes)
   expect_equal(frmls$lfc_col, "log2FoldChange")
+})
+
+
+# ── 9b. looplook_report allows precomputed results without bedpe_file ────────
+
+test_that("looplook_report bedpe_file defaults to NULL", {
+  frmls <- formals(looplook::looplook_report)
+  expect_null(frmls$bedpe_file)
 })
 
 
@@ -340,17 +348,19 @@ test_that("run_heatmap_and_connectivity assigns each gene to one connectivity gr
   )
   glist <- setNames(c(1, 2, 3, 4, 5), genes)
 
-  res <- looplook:::run_heatmap_and_connectivity(
-    target_genes = genes,
-    tpm_mat_raw = tpm_mat,
-    meta_raw = meta,
-    loop_stats_df = stats_df,
-    global_glist = glist,
-    heatmap_ntop = 50,
-    cor_method = "pearson",
-    current_proj_name = "group_test",
-    source_type = "loops",
-    skip_heatmap = TRUE
+  expect_no_warning(
+    res <- looplook:::run_heatmap_and_connectivity(
+      target_genes = genes,
+      tpm_mat_raw = tpm_mat,
+      meta_raw = meta,
+      loop_stats_df = stats_df,
+      global_glist = glist,
+      heatmap_ntop = 50,
+      cor_method = "pearson",
+      current_proj_name = "group_test",
+      source_type = "loops",
+      skip_heatmap = TRUE
+    )
   )
   expect_true("Raincloud_LFC" %in% names(res))
   expect_false(any(duplicated(res$Raincloud_LFC$data$Gene)))
@@ -406,10 +416,10 @@ test_that("draw_karyo_heatmap_internal stores self-contained image payload", {
   skip_if_not_installed("png")
 
   txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
-  gr <- GenomicRanges::GRanges(
+  gr <- suppressWarnings(GenomicRanges::GRanges(
     seqnames = c("chr1", "chr2"),
     ranges = IRanges::IRanges(start = c(1e6, 2e6), width = 5000)
-  )
+  ))
 
   obj <- looplook:::draw_karyo_heatmap_internal(
     gr_data = gr,

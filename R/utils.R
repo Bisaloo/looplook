@@ -49,6 +49,44 @@ if (getRversion() >= "2.15.1") {
   ))
 }
 
+.with_known_upstream_noise_suppressed <- function(expr) {
+  withCallingHandlers(
+    expr,
+    warning = function(w) {
+      msg <- conditionMessage(w)
+      if (
+        grepl("S4Vectors:::anyMissing\\(\\).*deprecated", msg) ||
+          grepl("`aes_()` was deprecated in ggplot2 3.0.0.", msg, fixed = TRUE) ||
+          grepl("`aes_string()` was deprecated in ggplot2 3.0.0.", msg, fixed = TRUE) ||
+          grepl("Using `size` aesthetic for lines was deprecated", msg, fixed = TRUE) ||
+          grepl("The `size` argument of `element_line()` is deprecated", msg, fixed = TRUE)
+      ) {
+        invokeRestart("muffleWarning")
+      }
+    },
+    message = function(m) {
+      msg <- conditionMessage(m)
+      if (
+        grepl("'select\\(\\)' returned 1:(1|many) mapping between keys and columns", msg) ||
+          grepl("genes were dropped because they have exons located on both strands", msg, fixed = TRUE) ||
+          grepl("Scale for colour is already present.", msg, fixed = TRUE) ||
+          grepl("Adding another scale for colour, which will replace the existing scale.", msg, fixed = TRUE)
+      ) {
+        invokeRestart("muffleMessage")
+      }
+    }
+  )
+}
+
+.with_messages_silenced <- function(expr) {
+  withCallingHandlers(
+    expr,
+    message = function(m) {
+      invokeRestart("muffleMessage")
+    }
+  )
+}
+
 #' Internal: Clean Gene Name Vector
 #'
 #' Removes empty strings, NA values, and duplicate entries from gene identifiers.
@@ -67,6 +105,175 @@ clean_gene_names <- function(x, split = NULL) {
   if (!is.null(split)) x <- unlist(strsplit(as.character(x), split))
   x <- unique(trimws(as.character(x)))
   x[x != "" & !is.na(x)]
+}
+
+.get_org_db_obj <- function(org_db) {
+  if (any(inherits(org_db, c("OrgDb", "AnnotationDb")))) {
+    return(org_db)
+  }
+  if (is.character(org_db) && length(org_db) == 1L && nzchar(org_db)) {
+    return(utils::getFromNamespace(org_db, org_db))
+  }
+  stop("`org_db` must be an OrgDb/AnnotationDb object or an installed package name.")
+}
+
+.extract_txdb_gene_ids <- function(genes_gr) {
+  if (is.null(genes_gr) || length(genes_gr) == 0) {
+    return(character(0))
+  }
+  gene_ids <- if ("gene_id" %in% colnames(S4Vectors::mcols(genes_gr))) {
+    S4Vectors::mcols(genes_gr)$gene_id
+  } else {
+    names(genes_gr)
+  }
+  gene_ids <- trimws(as.character(gene_ids))
+  gene_ids[gene_ids == "" | is.na(gene_ids)] <- NA_character_
+  gene_ids
+}
+
+.empty_orgdb_gene_map <- function(gene_ids, columns) {
+  gene_ids <- clean_gene_names(gene_ids)
+  out <- data.frame(gene_id = gene_ids, stringsAsFactors = FALSE)
+  for (col in columns) out[[col]] <- NA_character_
+  out
+}
+
+.detect_orgdb_keytype <- function(
+  gene_ids, org_db,
+  score_column = "SYMBOL",
+  candidate_keytypes = c("ENTREZID", "ENSEMBL", "SYMBOL", "GENENAME", "REFSEQ")
+) {
+  gene_ids <- clean_gene_names(gene_ids)
+  org_db_obj <- .get_org_db_obj(org_db)
+  if (length(gene_ids) == 0) {
+    return(list(
+      keytype = NA_character_,
+      hit_rate = 0,
+      hits = integer(0),
+      score_column = score_column,
+      org_db_obj = org_db_obj
+    ))
+  }
+
+  valid_keys <- AnnotationDbi::keytypes(org_db_obj)
+  valid_cols <- AnnotationDbi::columns(org_db_obj)
+  score_column <- if (score_column %in% valid_cols) score_column else valid_cols[1]
+  candidate_keytypes <- intersect(candidate_keytypes, valid_keys)
+  if (length(candidate_keytypes) == 0) {
+    return(list(
+      keytype = NA_character_,
+      hit_rate = 0,
+      hits = integer(0),
+      score_column = score_column,
+      org_db_obj = org_db_obj
+    ))
+  }
+
+  hit_counts <- vapply(candidate_keytypes, function(keytype) {
+    mapped <- tryCatch(
+      .with_known_upstream_noise_suppressed(AnnotationDbi::mapIds(
+        org_db_obj,
+        keys = gene_ids,
+        column = score_column,
+        keytype = keytype,
+        multiVals = "first"
+      )),
+      error = function(e) setNames(rep(NA_character_, length(gene_ids)), gene_ids)
+    )
+    sum(!is.na(mapped) & mapped != "")
+  }, integer(1))
+
+  if (length(hit_counts) == 0 || max(hit_counts) == 0) {
+    return(list(
+      keytype = NA_character_,
+      hit_rate = 0,
+      hits = hit_counts,
+      score_column = score_column,
+      org_db_obj = org_db_obj
+    ))
+  }
+
+  best_idx <- which.max(hit_counts)
+  list(
+    keytype = candidate_keytypes[[best_idx]],
+    hit_rate = hit_counts[[best_idx]] / length(gene_ids),
+    hits = hit_counts,
+    score_column = score_column,
+    org_db_obj = org_db_obj
+  )
+}
+
+.map_txdb_gene_ids <- function(
+  gene_ids, org_db, columns = "SYMBOL",
+  context = "TxDb gene_id mapping",
+  candidate_keytypes = c("ENTREZID", "ENSEMBL", "SYMBOL", "GENENAME", "REFSEQ"),
+  warn = TRUE,
+  min_hit_rate = 0.25
+) {
+  gene_ids <- clean_gene_names(gene_ids)
+  org_db_obj <- .get_org_db_obj(org_db)
+  valid_cols <- AnnotationDbi::columns(org_db_obj)
+  columns <- intersect(columns, valid_cols)
+  if (length(columns) == 0) {
+    out <- .empty_orgdb_gene_map(gene_ids, "SYMBOL")
+    attr(out, "keytype") <- NA_character_
+    attr(out, "hit_rate") <- 0
+    return(out)
+  }
+
+  det <- .detect_orgdb_keytype(
+    gene_ids = gene_ids,
+    org_db = org_db_obj,
+    score_column = if ("SYMBOL" %in% columns) "SYMBOL" else columns[1],
+    candidate_keytypes = candidate_keytypes
+  )
+  if (is.na(det$keytype)) {
+    if (warn && length(gene_ids) > 0) {
+      warning(
+        sprintf(
+          "%s: unable to match TxDb gene_id values against supported OrgDb keytypes; raw gene_id values will be retained where needed.",
+          context
+        ),
+        call. = FALSE
+      )
+    }
+    out <- .empty_orgdb_gene_map(gene_ids, columns)
+    attr(out, "keytype") <- NA_character_
+    attr(out, "hit_rate") <- 0
+    return(out)
+  }
+
+  if (warn && det$hit_rate < min_hit_rate) {
+    warning(
+      sprintf(
+        "%s: low OrgDb mapping rate for TxDb gene_id values (best keytype = %s, %.1f%% matched).",
+        context, det$keytype, det$hit_rate * 100
+      ),
+      call. = FALSE
+    )
+  }
+
+  raw_map <- tryCatch(
+    .with_known_upstream_noise_suppressed(AnnotationDbi::select(
+      org_db_obj,
+      keys = gene_ids,
+      columns = columns,
+      keytype = det$keytype
+    )),
+    error = function(e) NULL
+  )
+  if (is.null(raw_map) || nrow(raw_map) == 0) {
+    out <- .empty_orgdb_gene_map(gene_ids, columns)
+    attr(out, "keytype") <- det$keytype
+    attr(out, "hit_rate") <- det$hit_rate
+    return(out)
+  }
+
+  raw_map$gene_id <- as.character(raw_map[[det$keytype]])
+  raw_map <- raw_map[, c("gene_id", setdiff(colnames(raw_map), c(det$keytype, "gene_id"))), drop = FALSE]
+  attr(raw_map, "keytype") <- det$keytype
+  attr(raw_map, "hit_rate") <- det$hit_rate
+  raw_map
 }
 
 
@@ -119,39 +326,41 @@ resolve_gene_conflicts <- function(
     return(current_anno_df)
   }
 
-  gr_input <- GenomicRanges::makeGRangesFromDataFrame(current_anno_df,
-    keep.extra.columns = TRUE
+  gr_input <- .with_known_upstream_noise_suppressed(
+    GenomicRanges::makeGRangesFromDataFrame(current_anno_df,
+      keep.extra.columns = TRUE
+    )
   )
-  all_genes <- GenomicFeatures::genes(txdb_obj)
-  hits <- GenomicRanges::findOverlaps(
-    gr_input,
+  all_genes <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+  promoters_gr <- .with_known_upstream_noise_suppressed(
     GenomicFeatures::promoters(all_genes,
       upstream = abs(tss_region[1]),
       downstream = abs(tss_region[2])
     )
   )
+  hits <- .with_known_upstream_noise_suppressed(GenomicRanges::findOverlaps(
+    gr_input,
+    promoters_gr
+  ))
 
   if (length(hits) > 0) {
     candidates <- data.frame(
       query_idx = S4Vectors::queryHits(hits),
-      gene_id = names(all_genes)[S4Vectors::subjectHits(hits)],
+      gene_id = .extract_txdb_gene_ids(all_genes)[S4Vectors::subjectHits(hits)],
       stringsAsFactors = FALSE
     )
 
-    org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
-    valid_keys <- AnnotationDbi::keytypes(org_db_obj)
-    primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
-
     cols_to_get <- "SYMBOL"
-    valid_cols <- AnnotationDbi::columns(org_db_obj)
+    valid_cols <- AnnotationDbi::columns(.get_org_db_obj(org_db_pkg))
     has_genetype <- "GENETYPE" %in% valid_cols
     if (has_genetype) cols_to_get <- c(cols_to_get, "GENETYPE")
 
-    gene_map <- AnnotationDbi::select(
-      org_db_obj,
-      keys = unique(candidates$gene_id),
+    gene_map <- .map_txdb_gene_ids(
+      gene_ids = unique(candidates$gene_id),
+      org_db = org_db_pkg,
       columns = cols_to_get,
-      keytype = primary_key
+      context = "resolve_gene_conflicts",
+      warn = TRUE
     )
 
     gene_map$tpm <- if (!is.null(gene_expr_map)) {
@@ -177,9 +386,8 @@ resolve_gene_conflicts <- function(
       gene_map$type_rank <- 1 # All genes have equal rank if GENETYPE is missing
     }
 
-    join_by_args <- setNames(primary_key, "gene_id")
     resolved_candidates <- candidates %>%
-      dplyr::left_join(gene_map, by = join_by_args) %>%
+      dplyr::left_join(gene_map, by = "gene_id") %>%
       dplyr::group_by(query_idx) %>%
       dplyr::mutate(has_active = any(tpm > 0)) %>%
       dplyr::filter(!has_active | tpm > 0) %>%
@@ -513,11 +721,13 @@ compute_refined_stats <- function(
 #' Internal: Load Expression Matrix
 #'
 #' Reads a normalized expression matrix (TPM/FPKM), sets gene identifiers as
-#' row names, extracts the specified sample columns, and returns per-gene mean
-#' expression values.
+#' the first column, validates the requested sample columns, and returns
+#' per-gene mean expression values. Sample column names must be unique; missing
+#' or duplicated selections raise an error instead of being silently dropped.
 #'
 #' @param expr_matrix_file Character. Path to the expression matrix file.
 #' @param sample_columns Character or integer vector. Sample columns to average.
+#'   Character selections must exactly match unique column names.
 #' @return Named numeric vector of per-gene mean expression values.
 #' @importFrom data.table fread
 #' @keywords internal
@@ -525,21 +735,98 @@ load_expression_matrix <- function(expr_matrix_file, sample_columns = NULL) {
   if (!file.exists(expr_matrix_file)) {
     stop("Expression matrix file not found: ", expr_matrix_file)
   }
-  d <- as.data.frame(data.table::fread(expr_matrix_file))
-  rownames(d) <- d[[1]]
+  d <- as.data.frame(data.table::fread(
+    expr_matrix_file,
+    data.table = FALSE,
+    showProgress = FALSE
+  ))
+  if (ncol(d) < 2) {
+    stop(
+      "Expression matrix must contain a gene identifier column and at least one sample column."
+    )
+  }
+
+  gene_ids <- trimws(as.character(d[[1]]))
+  sample_names <- colnames(d)[-1]
+  if (any(is.na(sample_names)) || any(!nzchar(sample_names))) {
+    stop("Expression matrix contains empty sample column names.")
+  }
+  dup_sample_names <- unique(sample_names[duplicated(sample_names)])
+  if (length(dup_sample_names) > 0) {
+    stop(
+      "Expression matrix contains duplicated sample column names: ",
+      paste(dup_sample_names, collapse = ", "),
+      ". Rename columns uniquely before calling looplook."
+    )
+  }
   d <- d[, -1, drop = FALSE]
+  colnames(d) <- sample_names
 
   if (is.null(sample_columns)) {
     sub_mat <- d
   } else if (is.character(sample_columns)) {
-    sub_mat <- d[, intersect(sample_columns, colnames(d)), drop = FALSE]
+    dup_requested <- unique(sample_columns[duplicated(sample_columns)])
+    if (length(dup_requested) > 0) {
+      stop(
+        "`sample_columns` contains duplicates: ",
+        paste(dup_requested, collapse = ", "),
+        "."
+      )
+    }
+
+    missing_cols <- setdiff(sample_columns, sample_names)
+    if (length(missing_cols) > 0) {
+      stop(
+        "Requested sample columns not found in expression matrix: ",
+        paste(missing_cols, collapse = ", ")
+      )
+    }
+    sub_mat <- d[, sample_columns, drop = FALSE]
   } else {
+    sample_columns <- as.integer(sample_columns)
+    dup_requested <- unique(sample_columns[duplicated(sample_columns)])
+    if (length(dup_requested) > 0) {
+      stop(
+        "`sample_columns` contains duplicated column indices: ",
+        paste(dup_requested, collapse = ", "),
+        "."
+      )
+    }
+    if (any(is.na(sample_columns)) || any(sample_columns < 1L | sample_columns > ncol(d))) {
+      stop("`sample_columns` contains invalid column indices for the expression matrix.")
+    }
     sub_mat <- d[, sample_columns, drop = FALSE]
   }
   if (ncol(sub_mat) == 0) stop("No valid sample columns found in expression matrix.")
 
-  vals <- if (ncol(sub_mat) > 1) rowMeans(sub_mat, na.rm = TRUE) else sub_mat[, 1]
-  names(vals) <- rownames(d)
+  numeric_token_pattern <- "^[+-]?(?:Inf|NaN|(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)$"
+  sub_mat_parsed <- lapply(sub_mat, function(x) {
+    raw_x <- trimws(as.character(x))
+    is_missing <- is.na(raw_x) | raw_x == ""
+    is_numeric <- grepl(numeric_token_pattern, raw_x)
+    bad <- !is_missing & !is_numeric
+    values <- rep(NA_real_, length(raw_x))
+    if (any(is_numeric)) {
+      values[is_numeric] <- as.numeric(raw_x[is_numeric])
+    }
+    list(values = values, bad = bad)
+  })
+  sub_mat_num <- lapply(sub_mat_parsed, `[[`, "values")
+  bad_cols <- names(sub_mat)[vapply(sub_mat_parsed, function(x) any(x$bad), logical(1))]
+  if (length(bad_cols) > 0) {
+    stop(
+      "Expression matrix contains non-numeric values in sample columns: ",
+      paste(bad_cols, collapse = ", ")
+    )
+  }
+  sub_mat_num <- as.data.frame(sub_mat_num, check.names = FALSE)
+
+  vals <- if (ncol(sub_mat_num) > 1) {
+    rowMeans(sub_mat_num, na.rm = TRUE)
+  } else {
+    sub_mat_num[[1]]
+  }
+  names(vals) <- gene_ids
   vals
 }
 
@@ -557,23 +844,27 @@ load_expression_matrix <- function(expr_matrix_file, sample_columns = NULL) {
 #' @importFrom scales hue_pal
 #' @keywords internal
 get_colors <- function(n, palette_input) {
+  if (n <= 0) {
+    return(character(0))
+  }
   safe_n <- max(1, n)
 
   if (length(palette_input) == 1 && palette_input %in% row.names(RColorBrewer::brewer.pal.info)) {
     max_avail <- RColorBrewer::brewer.pal.info[palette_input, "maxcolors"]
-    pal <- RColorBrewer::brewer.pal(min(safe_n, max_avail), palette_input)
+    pal_n <- min(max(3, safe_n), max_avail)
+    pal <- RColorBrewer::brewer.pal(pal_n, palette_input)
     cols <- grDevices::colorRampPalette(pal)(safe_n)
-    return(if (n == 0) character(0) else cols)
+    return(cols)
   } else if (length(palette_input) >= 1) {
     if (length(palette_input) < safe_n) {
       cols <- rep(palette_input, length.out = safe_n)
     } else {
       cols <- palette_input[seq_len(safe_n)]
     }
-    return(if (n == 0) character(0) else cols)
+    return(cols)
   } else {
     cols <- scales::hue_pal()(safe_n)
-    return(if (n == 0) character(0) else cols)
+    return(cols)
   }
 }
 
@@ -625,9 +916,13 @@ draw_karyo_heatmap_internal <- function(gr_data, title_prefix, bin_size, sat_lev
   valid_chroms <- intersect(standard_chroms, GenomeInfoDb::seqlevels(std_seqinfo))
 
   if (length(valid_chroms) > 0) {
-    full_genome_gr <- GenomicRanges::GRanges(seqnames = valid_chroms, ranges = IRanges::IRanges(start = 1, end = GenomeInfoDb::seqlengths(std_seqinfo)[valid_chroms]))
+    full_genome_gr <- .with_known_upstream_noise_suppressed(
+      GenomicRanges::GRanges(seqnames = valid_chroms, ranges = IRanges::IRanges(start = 1, end = GenomeInfoDb::seqlengths(std_seqinfo)[valid_chroms]))
+    )
     GenomeInfoDb::seqinfo(full_genome_gr) <- std_seqinfo[valid_chroms]
-    tiles <- GenomicRanges::tileGenome(GenomeInfoDb::seqinfo(full_genome_gr), tilewidth = bin_size, cut.last.tile.in.chrom = TRUE)
+    tiles <- .with_known_upstream_noise_suppressed(
+      GenomicRanges::tileGenome(GenomeInfoDb::seqinfo(full_genome_gr), tilewidth = bin_size, cut.last.tile.in.chrom = TRUE)
+    )
     hits <- GenomicRanges::countOverlaps(tiles, gr_data)
 
     bin_size_mb <- bin_size / 1e6
@@ -664,7 +959,9 @@ draw_karyo_heatmap_internal <- function(gr_data, title_prefix, bin_size, sat_lev
     pp$leftmargin <- 0.08
     pp$rightmargin <- 0.08
     pp$data1height <- 100
-    kp <- karyoploteR::plotKaryotype(genome = plot_species, plot.type = 1, chromosomes = valid_chroms, plot.params = pp, main = NULL)
+    kp <- .with_known_upstream_noise_suppressed(
+      karyoploteR::plotKaryotype(genome = plot_species, plot.type = 1, chromosomes = valid_chroms, plot.params = pp, main = NULL)
+    )
     karyoploteR::kpRect(kp, data = tiles, y0 = 0, y1 = 1, col = S4Vectors::mcols(tiles)$color, border = NA)
     main_title <- paste0("Loop Analysis: ", title_prefix, "\n(Genomic Load: Median ~", round(median_val / bin_size_mb, 1), " ", unit_label, "/MB)")
     graphics::mtext(main_title, side = 3, line = 1, outer = TRUE, cex = 1.2, font = 2)

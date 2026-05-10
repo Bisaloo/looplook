@@ -16,7 +16,9 @@ refine_loop_anchors_by_expression(
   color_palette = "Set2",
   karyo_bin_size = 1e+05,
   reclassify_by_expression = TRUE,
-  hub_percentile = 0.95
+  hub_percentile = 0.95,
+  write_output = TRUE,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -43,18 +45,24 @@ refine_loop_anchors_by_expression(
 \item{reclassify_by_expression}{Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.}
 
 \item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
+
+\item{write_output}{Logical. If \code{TRUE} (default), write the refined Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
+
+\item{quiet}{Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.}
 }
 \value{
 An invisible named list:
 \itemize{
 \item \code{loop_annotation} — Filtered 3D network with updated \code{loop_type} (e.g., eP-P).
-\item \code{anchor_annotation} — Cluster annotations with expressed targets.
+\item \code{anchor_loci_annotation} — Filtered non-redundant anchor-locus annotations with expressed targets.
+\item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
 \item \code{promoter_centric_stats} — Gene-level connectivity statistics.
 \item \code{distal_element_stats} — Distal-element connectivity statistics.
 \item \code{target_annotation} — External features linked to active loop components.
-\item \code{plot_list} — Named list of ggplot objects (dumbbell, rose, karyotype).
+\item \code{plots} — Named list of ggplot objects (dumbbell, rose, karyotype).
+\item \code{plot_list} — Backward-compatible alias of \code{plots}.
 }
-Also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
+If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
 }
 \description{
 Integrates quantitative RNA-seq data (e.g., TPM/FPKM) with 3D structural data

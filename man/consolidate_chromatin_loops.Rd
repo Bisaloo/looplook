@@ -13,7 +13,9 @@ consolidate_chromatin_loops(
   min_score = NULL,
   blacklist_species = NULL,
   region_of_interest = NULL,
-  out_file = NULL
+  out_file = NULL,
+  write_output = TRUE,
+  quiet = FALSE
 )
 }
 \arguments{
@@ -45,7 +47,8 @@ If \code{NULL} (default), the threshold is automatically calculated:
 
 \item{min_score}{Numeric. \strong{Post-filtering threshold}. Minimum score to keep a consolidated loop \strong{after} merging.
 \itemize{
-\item For \code{"consensus"} mode, this filters the consensus loops based on their representative score.
+\item For \code{"consensus"} and \code{"union"} modes, this filters loops based on a replicate-balanced representative score (mean of per-source cluster means).
+\item For \code{"intersect"} mode, this filters the retained File 1 loops by their original score.
 \item Default: \code{NULL} (no post-filtering).
 }}
 
@@ -55,6 +58,10 @@ If \code{NULL} (default), the threshold is automatically calculated:
 \item{region_of_interest}{Character. Path to BED file. Only loops overlapping these regions will be kept.}
 
 \item{out_file}{Character. The file name (including the file path) for saving results in the extended BEDPE format.}
+
+\item{write_output}{Logical. If \code{TRUE} (default), write the consolidated BEDPE file when \code{out_file} is provided. If \code{FALSE}, return the \code{GInteractions} object without creating directories or files.}
+
+\item{quiet}{Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.}
 }
 \value{
 A filtered \code{\link[InteractionSet]{GInteractions}} object.
@@ -76,7 +83,8 @@ The function supports three modes:
 It also supports a \strong{two-stage filtering strategy} to maximize signal-to-noise ratio:
 \itemize{
 \item \strong{Pre-filtering} (\code{min_raw_score}): Removes low-confidence noise (e.g., singleton reads) from raw files \emph{before} merging.
-\item \strong{Post-filtering} (\code{min_score}): Filters the final consensus loops based on their aggregated score (e.g., average intensity).
+\item \strong{Post-filtering} (\code{min_score}): Filters the final consensus loops based on their aggregated score.
+\item \strong{Replicate-Balanced Aggregation}: In \code{"consensus"} and \code{"union"} modes, each cluster score is computed as the mean of per-source mean scores, so one replicate with many fragmented calls cannot dominate the final representative score.
 }
 }
 \examples{

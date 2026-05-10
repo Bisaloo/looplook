@@ -715,16 +715,18 @@ if (!is.null(refined$plots)) {
 ```{r refinement-sankey, results='asis', eval=show_htmlwidgets && has_expr && !is.null(refined) && !is.null(refined$plots) && !is.null(refined$plots$Target_Sankey)}
 sankey_widget <- refined$plots$Target_Sankey
 sankey_widget$height <- 450
-sankey_file <- file.path(params$out_dir, "target_sankey.html")
-dir.create(params$out_dir, showWarnings = FALSE, recursive = TRUE)
-htmlwidgets::saveWidget(sankey_widget, sankey_file, selfcontained = TRUE,
-                        title = "Multi-Omics Sankey")
+sankey_widget$width <- "100%"
+desc_tag <- NULL
 if (!is.null(plot_descriptions[["Target_Sankey"]])) {
-  cat(sprintf('<div style="margin-bottom:12px; color:#555; font-size:0.92em; line-height:1.5;">%s</div>\n',
-    plot_descriptions[["Target_Sankey"]]))
+  desc_tag <- htmltools::tags$div(
+    style = "margin-bottom:12px; color:#555; font-size:0.92em; line-height:1.5;",
+    plot_descriptions[["Target_Sankey"]]
+  )
 }
-# iframe src is relative to the main report HTML; both live in out_dir
-cat(sprintf('<div class="plot-container"><iframe src="target_sankey.html" width="100%%" height="450" frameborder="0" style="border:none;"></iframe></div>\n'))
+print(htmltools::tagList(
+  desc_tag,
+  htmltools::tags$div(class = "plot-container", sankey_widget)
+))
 ```
 
 # Functional Profiling {.section-header}

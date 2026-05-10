@@ -85,9 +85,15 @@ test_that("run_ppi_analysis returns ggplot for valid input", {
   skip_if_not(has_data, "Pre-computed RData not available")
   skip_if_not_installed("STRINGdb")
   skip_if_not_installed("ggraph")
-  skip_on_bioc()
-  skip_on_cran()
-  # STRINGdb requires internet access
+  run_network_tests <- identical(
+    tolower(Sys.getenv("LOOPLOOK_RUN_NETWORK_TESTS", unset = "false")),
+    "true"
+  )
+  skip_if_not(
+    run_network_tests,
+    "External STRINGdb integration test disabled; set LOOPLOOK_RUN_NETWORK_TESTS=true to run."
+  )
+  # STRINGdb requires external network access even when explicitly enabled.
   has_net <- tryCatch(
     {
       con <- url("https://string-db.org", open = "r")

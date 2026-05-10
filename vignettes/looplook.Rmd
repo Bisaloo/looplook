@@ -192,7 +192,7 @@ This module identifies **multi-source consensus** by integrating datasets from v
 * **`gap`**: Defines the maximum allowable spatial distance (in base pairs) between loop anchors for them to be considered as part of the same physical cluster (default: `1000`).
 * **`min_raw_score` vs. `min_score` (The Dual-Filter)**:
     * `min_raw_score` acts as a pre-filter applied to individual BEDPE files before clustering (e.g., removing singleton noise where PET count < 2) to substantially reduce computational memory overhead.
-    * `min_score` serves as a post-filter applied to the final merged chromatin interactome to ensure high-confidence interactions.
+    * `min_score` serves as a post-filter applied to the final merged chromatin interactome to ensure high-confidence interactions. In `"consensus"` and `"union"` modes, this representative score is computed in a replicate-balanced manner: loop scores are averaged within each replicate first, then averaged across replicates.
 * **`blacklist_species`**: Automatically excludes chromatin loops overlapping with high-variance, artifact-prone genomic regions (e.g., centromeres, telomeres) by integrating the official ENCODE blacklist for specified species (e.g., `"hg38"`, `"mm10"`).
 * **`region_of_interest`**: Accepts an auxiliary BED file (e.g., a specific disease-associated locus or ChIP-seq peak set) to exclude global background interactions, outputting only loops with physical connectivity to the target genomic region.
 
@@ -350,9 +350,10 @@ The function exports a comprehensive Excel workbook (`*_Basic_Results.xlsx`) con
 * **`Putative_Target_Genes`**: Biologically resolved target genes. For an E-P loop, this field will report only the gene at the Promoter anchor.
 * **`Cluster_All_Genes`**: All genes within the broader 3D cluster or clique in which the loop resides, reflecting the extended topological neighborhood.
 
-#### 3. `anchor_annotation` (Spatial Hub Footprints)
+#### 3. `anchor_loci_annotation` (Non-redundant Spatial Anchor Footprints)
 
-* **`Cluster_Locus_Genes`**: All genes from loop anchors within a spatially interconnected hub (defined by network-connected components), representing the full gene set associated with the 3D hub.
+* **`Cluster_Locus_Genes`**: All genes from loop anchors within a spatially interconnected component (defined by network-connected components), representing the full gene set associated with the deduplicated anchor loci.
+* **Backward compatibility**: `anchor_annotation` is retained as an alias of `anchor_loci_annotation` for older scripts.
 
 #### 4. `promoter_centric_stats` & `distal_element_stats` (Topological Hub Detection)
 
@@ -692,7 +693,7 @@ The function provides fine-grained control over genomic locus selection, data fi
 #### 3. Aesthetic Mapping & Track Configuration
 
 - **`score_to_alpha`**: Logical flag. When `TRUE`, the quantitative interaction score is mapped to the transparency of Bezier arcs, enabling visual differentiation of interaction strength.
-- **`max_levels`**: Integer. Defines the maximum vertical stacking limit for the loop arcs to manage rendering height and readability.
+- **`max_levels`**: Integer. Defines the maximum number of visible stacking bands for loop arcs. Overlapping loops are separated vertically up to this cap; denser regions are compressed into the available height while preserving relative layering.
 - **`base_anchor_height`**: Numeric. Sets the vertical thickness of the rectangular anchors plotted at the base of the loop arcs.
 - **Color Controls** (`loop_color`, `anchor_color`, `overlap_color`, `exon_color`, `intron_color`): Character strings specifying custom colors for structural elements across all three tracks.
 - **`save_file`**: Character (Optional). Specifies the output file path and format (e.g., `".pdf"`) for exporting the final ggplot object.

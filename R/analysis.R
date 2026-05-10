@@ -9,8 +9,8 @@
 #'
 #' @details
 #' Two analysis steps use R's random number generator: GSEA target-gene down-sampling
-#' (controlled by \code{gsea_nSample}) and motif background loop sampling (limited to
-#' 2 000 background regions). For fully reproducible results, call \code{set.seed()}
+#' (controlled by \code{gsea_nSample}) and motif background anchor sampling (class-matched,
+#' limited to 2 000 background regions per contrast). For fully reproducible results, call \code{set.seed()}
 #' before running this function. The \code{clusterProfiler::GSEA} call internally
 #' uses \code{seed = TRUE} and is not affected by the global RNG state.
 #'
@@ -44,7 +44,6 @@
 #' @return An invisible nested list containing interactive plot objects, GO results, and gene sets.
 #'
 #' @examples
-#' \donttest{
 #' rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
 #' diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
 #' expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
@@ -52,15 +51,19 @@
 #' tmp <- new.env()
 #' load(rdata_path, envir = tmp)
 #' res <- tmp[[ls(tmp)[1]]]
-#' profile_target_genes(
+#' profile_res <- profile_target_genes(
 #'   annotation_res = res,
 #'   diff_file = diff_path,
 #'   expr_matrix_file = expr_path,
 #'   metadata_file = meta_path,
 #'   run_go = FALSE,
-#'   run_ppi = FALSE
+#'   run_ppi = FALSE,
+#'   run_motif = FALSE,
+#'   heatmap_nSample = 20,
+#'   gsea_nSample = 20,
+#'   cnet_nSample = 5
 #' )
-#' }
+#' names(profile_res)
 #'
 #' @export
 profile_target_genes <- function(
@@ -218,8 +221,9 @@ profile_target_genes <- function(
       # 3.4 Motif Analysis
       if (run_motif) {
         motif_plots <- safe_step("Motif analysis", {
+          motif_loop_df <- .subset_motif_loop_df(annotation_res$loop_annotation, src, task_name)
           run_distal_motif_analysis(
-            target_genes, annotation_res$loop_annotation,
+            target_genes, motif_loop_df,
             genome_id, motif_p_thresh, current_proj_name, motif_ntop
           )
         })
@@ -427,7 +431,9 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
 
   p_out <- NULL
   if (!is.null(gsea_res) && nrow(as.data.frame(gsea_res)) > 0) {
-    p_temp <- enrichplot::gseaplot2(gsea_res, geneSetID = 1, subplots = 1)
+    p_temp <- .with_known_upstream_noise_suppressed(
+      enrichplot::gseaplot2(gsea_res, geneSetID = 1, subplots = 1)
+    )
     d <- NULL
     if (inherits(p_temp, "ggplot")) {
       d <- p_temp$data
@@ -477,7 +483,9 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
       if (requireNamespace("aplot", quietly = TRUE)) {
         p_out <- aplot::plot_list(p1, p2, p3, ncol = 1, heights = c(2, 0.5, 1.5))
       } else {
-        p_out <- enrichplot::gseaplot2(gsea_res, geneSetID = 1, title = as.data.frame(gsea_res)$Description[1])
+        p_out <- .with_known_upstream_noise_suppressed(
+          enrichplot::gseaplot2(gsea_res, geneSetID = 1, title = as.data.frame(gsea_res)$Description[1])
+        )
       }
     }
   }
@@ -495,7 +503,13 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
   primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
   symbol_key <- if ("SYMBOL" %in% valid_keys) "SYMBOL" else valid_keys[1]
 
-  gene_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = clean_genes, column = primary_key, keytype = symbol_key, multiVals = "first")
+  gene_entrez <- .with_known_upstream_noise_suppressed(AnnotationDbi::mapIds(
+    org_db_obj,
+    keys = clean_genes,
+    column = primary_key,
+    keytype = symbol_key,
+    multiVals = "first"
+  ))
   valid_entrez <- na.omit(gene_entrez)
 
   use_symbol_mode <- length(valid_entrez) < 5 || (length(valid_entrez) / length(clean_genes) < 0.1)
@@ -513,7 +527,13 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
     if (use_symbol_mode) {
       final_universe <- names(universe_genes)
     } else {
-      univ_entrez <- AnnotationDbi::mapIds(org_db_obj, keys = names(universe_genes), column = primary_key, keytype = symbol_key, multiVals = "first")
+      univ_entrez <- .with_known_upstream_noise_suppressed(AnnotationDbi::mapIds(
+        org_db_obj,
+        keys = names(universe_genes),
+        column = primary_key,
+        keytype = symbol_key,
+        multiVals = "first"
+      ))
       final_universe <- na.omit(univ_entrez)
     }
   }
@@ -557,13 +577,17 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
   slot(ego, "result") <- ego_df
 
   options(ggrepel.max.overlaps = 100)
-  p_cnet <- enrichplot::cnetplot(ego, foldChange = fc_vec, showCategory = top_n, node_label = "category")
+  p_cnet <- .with_known_upstream_noise_suppressed(
+    enrichplot::cnetplot(ego, foldChange = fc_vec, showCategory = top_n, node_label = "category")
+  )
 
   if (length(genes_to_label) > 0 && requireNamespace("ggraph", quietly = TRUE)) {
     p_cnet <- p_cnet + ggraph::geom_node_text(ggplot2::aes(filter = name %in% genes_to_label, label = name), repel = TRUE, size = 3.5, fontface = "bold.italic", bg.color = "white", bg.r = 0.15, max.overlaps = Inf)
   }
 
-  p_cnet <- p_cnet + ggplot2::scale_color_distiller(palette = "PuOr", name = "Log2FC") + ggplot2::labs(title = paste0("GO Network: ", project_name)) + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+  p_cnet <- .with_known_upstream_noise_suppressed(
+    p_cnet + ggplot2::scale_color_distiller(palette = "PuOr", name = "Log2FC") + ggplot2::labs(title = paste0("GO Network: ", project_name)) + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold"))
+  )
 
   return(list(result = as.data.frame(ego), plot = p_cnet))
 }
@@ -817,18 +841,25 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 
   plot_df_rc <- plot_df_rc %>%
     dplyr::filter(!is.na(Conn_Group)) %>%
-    droplevels()
+    droplevels() %>%
+    dplyr::mutate(
+      Conn_Group_num = as.numeric(Conn_Group)
+    ) %>%
+    dplyr::mutate(
+      Conn_Group_jitter = .data$Conn_Group_num - 0.12,
+      Conn_Group_slab = .data$Conn_Group_num + 0.07
+    )
 
   if (nlevels(plot_df_rc$Conn_Group) > 1) {
     clean_theme <- ggplot2::theme_classic() + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14), plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 11, color = "black"), legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1, size = 10, color = "black"), axis.text.y = ggplot2::element_text(size = 10, color = "black"), axis.title.y = ggplot2::element_text(size = 12, face = "bold"), axis.line = ggplot2::element_line(color = "black", linewidth = 0.6), axis.ticks = ggplot2::element_line(color = "black"), panel.grid = ggplot2::element_blank())
     base_box <- function(y_var, y_lab) {
       ggplot2::ggplot(plot_df_rc, ggplot2::aes(fill = Conn_Group)) +
-        ggplot2::geom_jitter(ggplot2::aes_string(x = "as.numeric(Conn_Group) - 0.12", y = y_var, color = "Conn_Group"), shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
-        ggplot2::stat_boxplot(ggplot2::aes_string(x = "as.numeric(Conn_Group)", y = y_var, color = "Conn_Group"), geom = "errorbar", width = 0.05, linewidth = 0.5) +
-        ggplot2::geom_boxplot(ggplot2::aes_string(x = "as.numeric(Conn_Group)", y = y_var, color = "Conn_Group"), width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
-        ggplot2::stat_summary(ggplot2::aes_string(x = "as.numeric(Conn_Group)", y = y_var), fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
-        ggdist::stat_slab(ggplot2::aes_string(x = "as.numeric(Conn_Group) + 0.07", y = y_var, fill = "Conn_Group"), adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
-        ggdist::stat_slab(ggplot2::aes_string(x = "as.numeric(Conn_Group) + 0.07", y = y_var, color = "Conn_Group"), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
+        ggplot2::geom_jitter(ggplot2::aes(x = .data$Conn_Group_jitter, y = rlang::.data[[y_var]], color = .data$Conn_Group), shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
+        ggplot2::stat_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]], color = .data$Conn_Group), geom = "errorbar", width = 0.05, linewidth = 0.5) +
+        ggplot2::geom_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]], color = .data$Conn_Group), width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
+        ggplot2::stat_summary(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]]), fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
+        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = rlang::.data[[y_var]], fill = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
+        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = rlang::.data[[y_var]], color = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
         ggplot2::scale_x_continuous(breaks = seq_along(levels(plot_df_rc$Conn_Group)), labels = levels(plot_df_rc$Conn_Group)) +
         ggplot2::coord_cartesian(xlim = c(0.75, length(levels(plot_df_rc$Conn_Group)) + 0.6)) +
         ggplot2::scale_fill_manual(values = custom_colors) +
@@ -845,6 +876,246 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 .anchor_matches_targets <- function(gene_string, target_genes) {
   genes <- clean_gene_names(gene_string, ";")
   length(genes) > 0 && any(genes %in% target_genes)
+}
+
+.subset_motif_loop_df <- function(loop_df, src, task_name) {
+  if (!is.data.frame(loop_df) || !identical(src, "loops") || !"loop_type" %in% colnames(loop_df)) {
+    return(loop_df)
+  }
+
+  loop_types <- unique(as.character(loop_df$loop_type))
+  task_map <- paste0(gsub("-", "", loop_types, fixed = TRUE), "_Genes")
+  matched_types <- loop_types[task_map == task_name]
+  if (length(matched_types) == 0) {
+    return(loop_df)
+  }
+  loop_df[loop_df$loop_type %in% matched_types, , drop = FALSE]
+}
+
+.is_promoter_anchor_type <- function(anchor_type) {
+  anchor_type <- trimws(as.character(anchor_type))
+  !is.na(anchor_type) & anchor_type == "P"
+}
+
+.is_enhancer_like_anchor_type <- function(anchor_type) {
+  anchor_type <- trimws(as.character(anchor_type))
+  !is.na(anchor_type) & anchor_type %in% c("E", "eP", "eG")
+}
+
+.empty_anchor_df <- function() {
+  data.frame(
+    anchor_id = character(),
+    chr = character(),
+    start = integer(),
+    end = integer(),
+    anchor_type = character(),
+    stringsAsFactors = FALSE
+  )
+}
+
+.deduplicate_anchor_df <- function(anchor_df) {
+  if (is.null(anchor_df) || nrow(anchor_df) == 0) {
+    return(.empty_anchor_df())
+  }
+
+  anchor_df <- anchor_df[!is.na(anchor_df$chr) & nzchar(anchor_df$chr), , drop = FALSE]
+  anchor_df <- anchor_df[!is.na(anchor_df$start) & !is.na(anchor_df$end), , drop = FALSE]
+  if (nrow(anchor_df) == 0) {
+    return(.empty_anchor_df())
+  }
+
+  anchor_df$anchor_id <- ifelse(
+    is.na(anchor_df$anchor_id) | !nzchar(anchor_df$anchor_id),
+    paste(anchor_df$chr, anchor_df$start, anchor_df$end, sep = "_"),
+    as.character(anchor_df$anchor_id)
+  )
+  anchor_df <- anchor_df[!duplicated(anchor_df$anchor_id), , drop = FALSE]
+  rownames(anchor_df) <- NULL
+  anchor_df
+}
+
+.anchor_df_to_gr <- function(anchor_df) {
+  anchor_df <- .deduplicate_anchor_df(anchor_df)
+  if (nrow(anchor_df) == 0) {
+    return(.with_known_upstream_noise_suppressed(GenomicRanges::GRanges()))
+  }
+
+  gr <- .with_known_upstream_noise_suppressed(GenomicRanges::GRanges(
+    seqnames = anchor_df$chr,
+    ranges = IRanges::IRanges(start = anchor_df$start, end = anchor_df$end)
+  ))
+  names(gr) <- anchor_df$anchor_id
+  S4Vectors::mcols(gr)$anchor_id <- anchor_df$anchor_id
+  S4Vectors::mcols(gr)$anchor_type <- anchor_df$anchor_type
+  gr
+}
+
+.make_anchor_df <- function(loop_df, idx, side, anchor_types) {
+  if (length(idx) == 0) {
+    return(.empty_anchor_df())
+  }
+
+  chr_col <- paste0("chr", side)
+  start_col <- paste0("start", side)
+  end_col <- paste0("end", side)
+  id_col <- paste0("a", side, "_id")
+  anchor_id <- if (id_col %in% colnames(loop_df)) {
+    loop_df[[id_col]][idx]
+  } else {
+    paste(loop_df[[chr_col]][idx], loop_df[[start_col]][idx], loop_df[[end_col]][idx], sep = "_")
+  }
+
+  data.frame(
+    anchor_id = as.character(anchor_id),
+    chr = as.character(loop_df[[chr_col]][idx]),
+    start = as.integer(loop_df[[start_col]][idx]),
+    end = as.integer(loop_df[[end_col]][idx]),
+    anchor_type = as.character(anchor_types[idx]),
+    stringsAsFactors = FALSE
+  )
+}
+
+.prepare_motif_anchor_sets <- function(loop_df, target_genes) {
+  empty_gr <- .with_known_upstream_noise_suppressed(GenomicRanges::GRanges())
+  empty_sets <- list(
+    target_loop_n = 0L,
+    proximal_fg = empty_gr,
+    distal_fg = empty_gr,
+    proximal_bg = empty_gr,
+    distal_bg = empty_gr
+  )
+  if (!is.data.frame(loop_df) || nrow(loop_df) == 0) {
+    return(empty_sets)
+  }
+
+  col_g1 <- intersect(c("anchor1_gene", "Anchor1_Gene", "gene_name_1", "Gene_Name_1", "Symbol_1", "nearest_gene_1", "gene1"), colnames(loop_df))[1]
+  col_g2 <- intersect(c("anchor2_gene", "Anchor2_Gene", "gene_name_2", "Gene_Name_2", "Symbol_2", "nearest_gene_2", "gene2"), colnames(loop_df))[1]
+  col_t1 <- intersect(c("anchor1_type", "Anchor1_Type", "type1"), colnames(loop_df))[1]
+  col_t2 <- intersect(c("anchor2_type", "Anchor2_Type", "type2"), colnames(loop_df))[1]
+  required_cols <- c("chr1", "start1", "end1", "chr2", "start2", "end2")
+  if (any(is.na(c(col_g1, col_g2, col_t1, col_t2))) || !all(required_cols %in% colnames(loop_df))) {
+    return(empty_sets)
+  }
+
+  target_genes <- clean_gene_names(target_genes)
+  if (length(target_genes) == 0) {
+    return(empty_sets)
+  }
+
+  a1_hits <- vapply(loop_df[[col_g1]], .anchor_matches_targets,
+    target_genes = target_genes, FUN.VALUE = logical(1)
+  )
+  a2_hits <- vapply(loop_df[[col_g2]], .anchor_matches_targets,
+    target_genes = target_genes, FUN.VALUE = logical(1)
+  )
+  t1 <- trimws(as.character(loop_df[[col_t1]]))
+  t2 <- trimws(as.character(loop_df[[col_t2]]))
+
+  a1_target_promoter <- a1_hits & .is_promoter_anchor_type(t1)
+  a2_target_promoter <- a2_hits & .is_promoter_anchor_type(t2)
+  target_loop_idx <- which(a1_target_promoter | a2_target_promoter)
+  is_bg_loop <- !(seq_len(nrow(loop_df)) %in% target_loop_idx)
+
+  proximal_fg_df <- rbind(
+    .make_anchor_df(loop_df, which(a1_target_promoter), "1", t1),
+    .make_anchor_df(loop_df, which(a2_target_promoter), "2", t2)
+  )
+  distal_fg_df <- rbind(
+    .make_anchor_df(loop_df, which(a1_target_promoter & .is_enhancer_like_anchor_type(t2)), "2", t2),
+    .make_anchor_df(loop_df, which(a2_target_promoter & .is_enhancer_like_anchor_type(t1)), "1", t1)
+  )
+  proximal_bg_df <- rbind(
+    .make_anchor_df(loop_df, which(is_bg_loop & .is_promoter_anchor_type(t1)), "1", t1),
+    .make_anchor_df(loop_df, which(is_bg_loop & .is_promoter_anchor_type(t2)), "2", t2)
+  )
+  distal_bg_df <- rbind(
+    .make_anchor_df(loop_df, which(is_bg_loop & .is_enhancer_like_anchor_type(t1)), "1", t1),
+    .make_anchor_df(loop_df, which(is_bg_loop & .is_enhancer_like_anchor_type(t2)), "2", t2)
+  )
+
+  list(
+    target_loop_n = length(target_loop_idx),
+    proximal_fg = .anchor_df_to_gr(proximal_fg_df),
+    distal_fg = .anchor_df_to_gr(distal_fg_df),
+    proximal_bg = .anchor_df_to_gr(proximal_bg_df),
+    distal_bg = .anchor_df_to_gr(distal_bg_df)
+  )
+}
+
+.calc_gc_fraction <- function(seq_set) {
+  seq_chr <- as.character(seq_set)
+  seq_len <- nchar(seq_chr)
+  gc_len <- nchar(gsub("[^GCgc]", "", seq_chr))
+  out <- rep(NA_real_, length(seq_chr))
+  keep <- seq_len > 0
+  out[keep] <- gc_len[keep] / seq_len[keep]
+  out
+}
+
+.sample_gc_matched_background <- function(fg_gr, bg_gr, genome_obj, max_bg = 2000L, gc_bins = 5L) {
+  if (length(bg_gr) == 0) {
+    return(bg_gr)
+  }
+
+  target_n <- min(length(bg_gr), as.integer(max_bg))
+  if (target_n <= 0L) {
+    return(bg_gr[0])
+  }
+  if (length(bg_gr) <= target_n || length(fg_gr) == 0) {
+    return(bg_gr)
+  }
+
+  fg_gc <- .calc_gc_fraction(BSgenome::getSeq(genome_obj, fg_gr))
+  bg_gc <- .calc_gc_fraction(BSgenome::getSeq(genome_obj, bg_gr))
+  finite_gc <- c(fg_gc[is.finite(fg_gc)], bg_gc[is.finite(bg_gc)])
+  if (length(finite_gc) < 2 || length(unique(finite_gc)) < 2) {
+    return(bg_gr[sample(seq_along(bg_gr), target_n)])
+  }
+
+  gc_breaks <- unique(stats::quantile(
+    finite_gc,
+    probs = seq(0, 1, length.out = gc_bins + 1),
+    na.rm = TRUE,
+    names = FALSE,
+    type = 8
+  ))
+  if (length(gc_breaks) < 2) {
+    return(bg_gr[sample(seq_along(bg_gr), target_n)])
+  }
+
+  fg_bin <- cut(fg_gc, breaks = gc_breaks, include.lowest = TRUE, labels = FALSE)
+  bg_bin <- cut(bg_gc, breaks = gc_breaks, include.lowest = TRUE, labels = FALSE)
+  fg_tab <- table(fg_bin)
+  if (length(fg_tab) == 0 || sum(fg_tab) == 0) {
+    return(bg_gr[sample(seq_along(bg_gr), target_n)])
+  }
+
+  fg_prop <- as.numeric(fg_tab) / sum(fg_tab)
+  desired <- floor(target_n * fg_prop)
+  remainder <- target_n - sum(desired)
+  if (remainder > 0) {
+    bump_idx <- rep(seq_along(desired), length.out = remainder)
+    desired[bump_idx] <- desired[bump_idx] + 1L
+  }
+
+  bin_ids <- as.integer(names(fg_tab))
+  selected <- integer()
+  for (i in seq_along(bin_ids)) {
+    candidates <- which(bg_bin == bin_ids[i])
+    take_n <- min(length(candidates), desired[i])
+    if (take_n > 0) {
+      selected <- c(selected, sample(candidates, take_n))
+    }
+  }
+  selected <- unique(selected)
+  if (length(selected) < target_n) {
+    remaining <- setdiff(seq_along(bg_gr), selected)
+    if (length(remaining) > 0) {
+      selected <- c(selected, sample(remaining, min(length(remaining), target_n - length(selected))))
+    }
+  }
+
+  bg_gr[sort(unique(selected))]
 }
 
 #' @title Run Dual Motif Analysis for Loop Anchors
@@ -867,65 +1138,35 @@ run_distal_motif_analysis <- function(
   genome_obj <- get0(bs_pkg, envir = asNamespace(bs_pkg))
   if (!is.data.frame(loop_df)) loop_df <- as.data.frame(loop_df)
 
-  col_g1 <- intersect(c("anchor1_gene", "Anchor1_Gene", "gene_name_1", "Gene_Name_1", "Symbol_1", "nearest_gene_1", "gene1"), colnames(loop_df))[1]
-  col_g2 <- intersect(c("anchor2_gene", "Anchor2_Gene", "gene_name_2", "Gene_Name_2", "Symbol_2", "nearest_gene_2", "gene2"), colnames(loop_df))[1]
-  if (is.na(col_g1) || is.na(col_g2)) {
+  motif_sets <- .prepare_motif_anchor_sets(loop_df, target_genes)
+  has_proximal <- length(motif_sets$proximal_fg) >= 5 && length(motif_sets$proximal_bg) >= 5
+  has_distal <- length(motif_sets$distal_fg) >= 5 && length(motif_sets$distal_bg) >= 5
+  if (!has_proximal && !has_distal) {
     return(list())
   }
-
-  target_genes <- clean_gene_names(target_genes)
-  a1_hits <- vapply(loop_df[[col_g1]], .anchor_matches_targets,
-    target_genes = target_genes, FUN.VALUE = logical(1)
-  )
-  a2_hits <- vapply(loop_df[[col_g2]], .anchor_matches_targets,
-    target_genes = target_genes, FUN.VALUE = logical(1)
-  )
-  target_indices <- which(a1_hits | a2_hits)
-  if (length(target_indices) < 5) {
-    return(list())
-  }
-
-  target_loops <- loop_df[target_indices, ]
-  target_a1_hits <- a1_hits[target_indices]
-  target_a2_hits <- a2_hits[target_indices]
-  proximal_gr_list <- list()
-  distal_gr_list <- list()
-
-  for (i in seq_len(nrow(target_loops))) {
-    r <- target_loops[i, ]
-    if (target_a1_hits[i]) {
-      proximal_gr_list[[length(proximal_gr_list) + 1]] <- GenomicRanges::GRanges(seqnames = r$chr1, ranges = IRanges::IRanges(start = r$start1, end = r$end1))
-      distal_gr_list[[length(distal_gr_list) + 1]] <- GenomicRanges::GRanges(seqnames = r$chr2, ranges = IRanges::IRanges(start = r$start2, end = r$end2))
-    }
-    if (target_a2_hits[i]) {
-      proximal_gr_list[[length(proximal_gr_list) + 1]] <- GenomicRanges::GRanges(seqnames = r$chr2, ranges = IRanges::IRanges(start = r$start2, end = r$end2))
-      distal_gr_list[[length(distal_gr_list) + 1]] <- GenomicRanges::GRanges(seqnames = r$chr1, ranges = IRanges::IRanges(start = r$start1, end = r$end1))
-    }
-  }
-
-  bg_indices <- setdiff(seq_len(nrow(loop_df)), target_indices)
-  if (length(bg_indices) > 2000) bg_indices <- sample(bg_indices, 2000)
-  bg_loops <- loop_df[bg_indices, ]
-  bg_gr <- c(GenomicRanges::GRanges(seqnames = bg_loops$chr1, ranges = IRanges::IRanges(start = bg_loops$start1, end = bg_loops$end1)), GenomicRanges::GRanges(seqnames = bg_loops$chr2, ranges = IRanges::IRanges(start = bg_loops$start2, end = bg_loops$end2)))
 
   plots_list <- list()
-  enrich_prox <- .calc_motif_enrichment(
-    do.call(c, proximal_gr_list), bg_gr,
-    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
-  )
-  res_prox <- .annotate_motif_families(enrich_prox, jaspar_db, jaspar_collection)
-  plots_list$Proximal_Motif_Bar <- .plot_save_motif(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
-  plots_list$Proximal_Motif_Logos <- .plot_top_motif_logos(res_prox, top_n, jaspar_db)
-  plots_list$Proximal_Motif_Rank <- .plot_motif_rank_scatter(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
+  if (has_proximal) {
+    enrich_prox <- .calc_motif_enrichment(
+      motif_sets$proximal_fg, motif_sets$proximal_bg,
+      genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
+    )
+    res_prox <- .annotate_motif_families(enrich_prox, jaspar_db, jaspar_collection)
+    plots_list$Proximal_Motif_Bar <- .plot_save_motif(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
+    plots_list$Proximal_Motif_Logos <- .plot_top_motif_logos(res_prox, top_n, jaspar_db)
+    plots_list$Proximal_Motif_Rank <- .plot_motif_rank_scatter(res_prox, paste0(current_proj_name, "_Motif_Proximal"))
+  }
 
-  enrich_dist <- .calc_motif_enrichment(
-    do.call(c, distal_gr_list), bg_gr,
-    genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
-  )
-  res_dist <- .annotate_motif_families(enrich_dist, jaspar_db, jaspar_collection)
-  plots_list$Distal_Motif_Bar <- .plot_save_motif(res_dist, paste0(current_proj_name, "_Motif_Distal"))
-  plots_list$Distal_Motif_Logos <- .plot_top_motif_logos(res_dist, top_n, jaspar_db)
-  plots_list$Distal_Motif_Rank <- .plot_motif_rank_scatter(res_dist, paste0(current_proj_name, "_Motif_Distal"))
+  if (has_distal) {
+    enrich_dist <- .calc_motif_enrichment(
+      motif_sets$distal_fg, motif_sets$distal_bg,
+      genome_obj, pval_thresh, species_id, jaspar_db, jaspar_collection
+    )
+    res_dist <- .annotate_motif_families(enrich_dist, jaspar_db, jaspar_collection)
+    plots_list$Distal_Motif_Bar <- .plot_save_motif(res_dist, paste0(current_proj_name, "_Motif_Distal"))
+    plots_list$Distal_Motif_Logos <- .plot_top_motif_logos(res_dist, top_n, jaspar_db)
+    plots_list$Distal_Motif_Rank <- .plot_motif_rank_scatter(res_dist, paste0(current_proj_name, "_Motif_Distal"))
+  }
 
   return(plots_list)
 }
@@ -975,6 +1216,7 @@ run_distal_motif_analysis <- function(
 ) {
   fg_gr <- GenomicRanges::resize(fg_gr[GenomicRanges::start(fg_gr) > 0], width = 500, fix = "center")
   bg_gr <- GenomicRanges::resize(bg_gr[GenomicRanges::start(bg_gr) > 0], width = 500, fix = "center")
+  bg_gr <- .sample_gc_matched_background(fg_gr, bg_gr, genome_obj)
   if (length(fg_gr) == 0 || length(bg_gr) == 0) {
     return(NULL)
   }
@@ -1073,7 +1315,7 @@ run_distal_motif_analysis <- function(
 #'
 #' @details
 #' The profiling stage uses R's random number generator for GSEA gene-set
-#' down-sampling (\code{gsea_nSample}) and motif background sampling. Call
+#' down-sampling (\code{gsea_nSample}) and motif background anchor sampling. Call
 #' \code{set.seed()} before \code{looplook_report()} for fully reproducible
 #' results.
 #'
@@ -1124,16 +1366,28 @@ run_distal_motif_analysis <- function(
 #' @export
 #'
 #' @examples
-#' \donttest{
-#' looplook_report(
-#'   bedpe_file   = system.file("extdata", "example_loops_1.bedpe", package = "looplook"),
-#'   target_bed   = system.file("extdata", "example_peaks.bed", package = "looplook"),
-#'   project_name = "My Study",
-#'   out_dir      = tempdir()
-#' )
+#' if (requireNamespace("rmarkdown", quietly = TRUE) &&
+#'   requireNamespace("knitr", quietly = TRUE)) {
+#'   report_path <- looplook_report(
+#'     precomputed_res = system.file("extdata", "analysis_results.RData", package = "looplook"),
+#'     expr_matrix_file = system.file("extdata", "example_tpm.txt", package = "looplook"),
+#'     diff_file = system.file("extdata", "example_deg.txt", package = "looplook"),
+#'     metadata_file = system.file("extdata", "example_coldata.txt", package = "looplook"),
+#'     project_name = "Example",
+#'     out_dir = tempdir(),
+#'     output_file = "looplook-example-report.html",
+#'     quiet = TRUE,
+#'     run_go = FALSE,
+#'     run_ppi = FALSE,
+#'     run_motif = FALSE,
+#'     heatmap_nSample = 20,
+#'     gsea_nSample = 20,
+#'     cnet_nSample = 5
+#'   )
+#'   file.exists(report_path)
 #' }
 looplook_report <- function(
-  bedpe_file,
+  bedpe_file = NULL,
   target_bed = NULL,
   expr_matrix_file = NULL,
   sample_columns = NULL,
@@ -1173,6 +1427,16 @@ looplook_report <- function(
   quiet = FALSE,
   ...
 ) {
+  normalize_report_path <- function(path) {
+    if (!is.character(path) || length(path) != 1L || is.na(path) || !nzchar(path)) {
+      return(path)
+    }
+    if (!file.exists(path)) {
+      return(path)
+    }
+    normalizePath(path, mustWork = TRUE)
+  }
+
   # Locate template
   template <- system.file("rmarkdown", "templates", "looplook-report",
     "skeleton", "skeleton.Rmd",
@@ -1183,6 +1447,16 @@ looplook_report <- function(
   # Create output directory
   if (!dir.exists(out_dir)) {
     dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  }
+  out_dir <- normalizePath(out_dir, mustWork = TRUE)
+
+  bedpe_file <- normalize_report_path(bedpe_file)
+  target_bed <- normalize_report_path(target_bed)
+  expr_matrix_file <- normalize_report_path(expr_matrix_file)
+  diff_file <- normalize_report_path(diff_file)
+  metadata_file <- normalize_report_path(metadata_file)
+  if (is.character(precomputed_res)) {
+    precomputed_res <- normalize_report_path(precomputed_res)
   }
 
   # Prepare output filename

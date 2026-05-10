@@ -39,17 +39,21 @@
 #' @param karyo_bin_size Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.
 #' @param neighbor_hop Integer. k-hop ego-network expansion order via \code{igraph::ego()}. \code{0} restricts to direct contacts. Default: \code{0}.
 #' @param hub_percentile Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.
+#' @param write_output Logical. If \code{TRUE} (default), write the Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.
+#' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
 #'
 #' @return An invisible named list:
 #' \itemize{
 #'   \item \code{target_annotation} — Peak-to-gene assignments with \code{Assigned_Target_Genes_Filled} (3D-prioritised, falling back to nearest gene).
 #'   \item \code{loop_annotation} — Annotated 3D interactome with \code{Putative_Target_Genes}.
-#'   \item \code{anchor_annotation} — Anchor-level genomic classifications.
+#'   \item \code{anchor_loci_annotation} — Non-redundant anchor-locus genomic classifications after within-cluster interval reduction.
+#'   \item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
 #'   \item \code{promoter_centric_stats} — Gene-level connectivity statistics.
 #'   \item \code{distal_element_stats} — Distal-element connectivity statistics.
-#'   \item \code{plot_list} — Named list of ggplot objects (donut, karyotype, rose, flower).
+#'   \item \code{plots} — Named list of ggplot objects (donut, karyotype, rose, flower).
+#'   \item \code{plot_list} — Backward-compatible alias of \code{plots}.
 #' }
-#' Also writes a multi-sheet Excel workbook to \code{out_dir}.
+#' If \code{write_output = TRUE}, also writes a multi-sheet Excel workbook to \code{out_dir}.
 #'
 #' @export
 #'
@@ -85,10 +89,15 @@ annotate_peaks_and_loops <- function(
   color_palette = "Set2",
   karyo_bin_size = 1e5,
   neighbor_hop = 0,
-  hub_percentile = 0.95
+  hub_percentile = 0.95,
+  write_output = TRUE,
+  quiet = FALSE
 ) {
-  # Ensure output directory exists
-  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  log_message <- function(...) {
+    if (!quiet) message(...)
+  }
+
+  if (write_output && !dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
 
   extract_ids <- function(id_vec) {
     paste(unique(na.omit(as.character(id_vec))), collapse = ";")
@@ -143,9 +152,9 @@ annotate_peaks_and_loops <- function(
 
   gene_expr_map <- NULL
   if (!is.null(expr_matrix_file) && !is.null(sample_columns)) {
-    message("Step 0: Loading expression data...")
+    log_message("Step 0: Loading expression data...")
     gene_expr_map <- load_expression_matrix(expr_matrix_file, sample_columns)
-    message("    >>> Expression loaded for ", length(gene_expr_map), " genes.")
+    log_message("    >>> Expression loaded for ", length(gene_expr_map), " genes.")
   }
 
   get_feature_class <- function(anno_str) {
@@ -168,7 +177,7 @@ annotate_peaks_and_loops <- function(
     return("E")
   }
 
-  message("Step 1: Reading BEDPE file...")
+  log_message("Step 1: Reading BEDPE file...")
   loops <- read_robust_general(bedpe_file, min_cols = 6, desc = "BEDPE")
   colnames(loops)[seq_len(6)] <- c("chr1", "start1", "end1", "chr2", "start2", "end2")
 
@@ -181,7 +190,7 @@ annotate_peaks_and_loops <- function(
     dplyr::left_join(anchors %>% dplyr::select(chr, start, end, a1_id = anchor_id), by = c("chr1" = "chr", "start1" = "start", "end1" = "end")) %>%
     dplyr::left_join(anchors %>% dplyr::select(chr, start, end, a2_id = anchor_id), by = c("chr2" = "chr", "start2" = "start", "end2" = "end"))
 
-  message("Step 2: Clustering loops...")
+  log_message("Step 2: Clustering loops...")
   valid_loops <- loops %>% dplyr::filter(!is.na(a1_id) & !is.na(a2_id))
   g <- igraph::graph_from_data_frame(valid_loops[, c("a1_id", "a2_id")], directed = FALSE)
   comp <- igraph::components(g)
@@ -190,23 +199,31 @@ annotate_peaks_and_loops <- function(
   if (length(comm) > 0) anchors$cluster_id[match(comm, anchors$anchor_id)] <- as.character(comp$membership[comm])
   anchors <- anchors %>% dplyr::filter(!is.na(cluster_id))
   loops <- loops %>% dplyr::left_join(anchors %>% dplyr::select(anchor_id, cluster_id), by = c("a1_id" = "anchor_id"))
-  gr_anchors <- GenomicRanges::makeGRangesFromDataFrame(anchors, keep.extra.columns = TRUE)
-  gr_anchors$anchor_id <- anchors$anchor_id
-  gr_list <- GenomicRanges::GRangesList(split(gr_anchors, gr_anchors$cluster_id))
-  cluster_regions <- unlist(GenomicRanges::reduce(gr_list))
-  cluster_regions$cluster_id <- names(cluster_regions)
-  names(cluster_regions) <- paste0("peak_", seq_along(cluster_regions))
+  gr_anchors <- .with_known_upstream_noise_suppressed({
+    gr_anchors <- GenomicRanges::makeGRangesFromDataFrame(anchors, keep.extra.columns = TRUE)
+    gr_anchors$anchor_id <- anchors$anchor_id
+    gr_anchors
+  })
+  cluster_regions <- .with_known_upstream_noise_suppressed({
+    gr_list <- GenomicRanges::GRangesList(split(gr_anchors, gr_anchors$cluster_id))
+    cluster_regions <- unlist(GenomicRanges::reduce(gr_list))
+    cluster_regions$cluster_id <- names(cluster_regions)
+    names(cluster_regions) <- paste0("peak_", seq_along(cluster_regions))
+    cluster_regions
+  })
 
-  message("Step 3: Biological Classification & Topology...")
+  log_message("Step 3: Biological Classification & Topology...")
   if (length(gr_anchors) == 0) {
     warning("No valid loop anchors found; returning empty annotation.")
     return(list(
-      anchor_annotation = data.frame(), loop_annotation = data.frame(),
+      anchor_loci_annotation = data.frame(), anchor_annotation = data.frame(), loop_annotation = data.frame(),
       promoter_centric_stats = data.frame(), distal_element_stats = data.frame(),
-      target_annotation = NULL, plots = list()
+      target_annotation = NULL, plots = list(), plot_list = list()
     ))
   }
-  anchor_anno <- ChIPseeker::annotatePeak(gr_anchors, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+  anchor_anno <- .with_known_upstream_noise_suppressed(
+    ChIPseeker::annotatePeak(gr_anchors, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+  )
   anchor_anno_df <- format_annotation_columns(as.data.frame(anchor_anno))
   anchor_anno_df <- resolve_gene_conflicts(anchor_anno_df, txdb_obj, org_db_pkg, tss_region, gene_expr_map)
   anchor_anno_df$type_code <- vapply(anchor_anno_df$annotation, get_feature_class, FUN.VALUE = character(1))
@@ -232,7 +249,7 @@ annotate_peaks_and_loops <- function(
   loops_annotated$single_loop_genes <- locus_genes
   loops_annotated$reg_loop_genes <- locus_genes
 
-  message("    Calculating Topology (Hops)...")
+  log_message("    Calculating Topology (Hops)...")
   map_info$SYMBOL <- trimws(map_info$SYMBOL)
   valid_pg_nodes <- map_info %>% dplyr::filter(type_code %in% c("P", "G") & !is.na(SYMBOL) & SYMBOL != "")
   lookup_pg_symbol <- valid_pg_nodes$SYMBOL
@@ -273,7 +290,7 @@ annotate_peaks_and_loops <- function(
   anchor_topo_map <- data.frame(anchor_id = nodes_in_graph, topo_genes_p = vapply(ego_list_loop, function(x) ids_to_genes_simple(names(x), lookup_p_symbol), character(1)), topo_genes_pg = vapply(ego_list_loop, function(x) ids_to_genes_simple(names(x), lookup_pg_symbol), character(1)), tgt_genes_pg = vapply(ego_list_target, function(x) ids_to_genes_simple(names(x), lookup_pg_symbol), character(1)), tgt_genes_p = vapply(ego_list_target, function(x) ids_to_genes_simple(names(x), lookup_p_symbol), character(1)), tgt_genes_prio = vapply(ego_list_target, function(x) ids_to_genes_priority(names(x), lookup_pg_symbol, lookup_pg_type), character(1)), stringsAsFactors = FALSE)
   anchor_topo_map[is.na(anchor_topo_map)] <- NA_character_
 
-  message("Step 4: Constructing Loop Tables...")
+  log_message("Step 4: Constructing Loop Tables...")
   loops_annotated <- loops_annotated %>%
     dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg1 = topo_genes_pg, p1 = topo_genes_p), by = c("a1_id" = "anchor_id")) %>%
     dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg2 = topo_genes_pg, p2 = topo_genes_p), by = c("a2_id" = "anchor_id")) %>%
@@ -299,14 +316,16 @@ annotate_peaks_and_loops <- function(
     warning("No cluster regions formed from loop anchors.")
     cluster_info <- data.frame()
   } else {
-    gene_annot <- ChIPseeker::annotatePeak(cluster_regions, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+    gene_annot <- .with_known_upstream_noise_suppressed(
+      ChIPseeker::annotatePeak(cluster_regions, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+    )
     cluster_info <- format_annotation_columns(as.data.frame(gene_annot))
   }
   if ("GENENAME" %in% colnames(cluster_info)) cluster_info <- cluster_info %>% dplyr::rename(Gene_description = GENENAME)
   cluster_info$cluster_id <- as.character(cluster_info$cluster_id)
   cluster_info <- cluster_info %>% dplyr::left_join(agg_cluster_locus, by = "cluster_id")
 
-  message("    Generating Promoter Centric Stats...")
+  log_message("    Generating Promoter Centric Stats...")
   raw_stats_df <- dplyr::bind_rows(
     loop_annotation_final %>% dplyr::filter(anchor1_type == "P" & !is.na(anchor1_gene)) %>% dplyr::select(Gene = anchor1_gene, Neighbor_Type = anchor2_type, Loop_Type = loop_type),
     loop_annotation_final %>% dplyr::filter(anchor2_type == "P" & !is.na(anchor2_gene)) %>% dplyr::select(Gene = anchor2_gene, Neighbor_Type = anchor1_type, Loop_Type = loop_type)
@@ -333,7 +352,7 @@ annotate_peaks_and_loops <- function(
     ) %>%
     dplyr::arrange(dplyr::desc(n_Linked_Distal))
 
-  message("    Generating Distal Element Stats...")
+  log_message("    Generating Distal Element Stats...")
   distal_raw_df <- dplyr::bind_rows(
     loop_annotation_final %>% dplyr::filter(anchor1_type %in% c("E", "G")) %>% dplyr::select(Distal_Anchor_ID = a1_id, Distal_Type = anchor1_type, Neighbor_Gene = anchor2_gene, Neighbor_Type = anchor2_type, Loop_Type = loop_type),
     loop_annotation_final %>% dplyr::filter(anchor2_type %in% c("E", "G")) %>% dplyr::select(Distal_Anchor_ID = a2_id, Distal_Type = anchor2_type, Neighbor_Gene = anchor1_gene, Neighbor_Type = anchor1_type, Loop_Type = loop_type)
@@ -366,7 +385,7 @@ annotate_peaks_and_loops <- function(
   bed_info <- NULL
   target_connected_loops <- NULL
   if (!is.null(target_bed)) {
-    message("Step 5: Integrating Target Annotations...")
+    log_message("Step 5: Integrating Target Annotations...")
     bed_target <- read_robust_general(target_bed, min_cols = 3, desc = "Target BED")
     colnames(bed_target)[c(1, 2, 3)] <- c("chr", "start", "end")
     if (nrow(bed_target) == 0) {
@@ -374,13 +393,18 @@ annotate_peaks_and_loops <- function(
       bed_info <- NULL
     } else {
       bed_target$start <- bed_target$start + 1 # BED is 0-based; GRanges is 1-based
-      gr_bed <- GenomicRanges::makeGRangesFromDataFrame(bed_target)
-      gr_bed$input_id <- paste0("Peak_", seq_len(nrow(bed_target)))
-      names(gr_bed) <- gr_bed$input_id
-      bed_annot <- ChIPseeker::annotatePeak(gr_bed, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+      gr_bed <- .with_known_upstream_noise_suppressed({
+        gr_bed <- GenomicRanges::makeGRangesFromDataFrame(bed_target)
+        gr_bed$input_id <- paste0("Peak_", seq_len(nrow(bed_target)))
+        names(gr_bed) <- gr_bed$input_id
+        gr_bed
+      })
+      bed_annot <- .with_known_upstream_noise_suppressed(
+        ChIPseeker::annotatePeak(gr_bed, TxDb = txdb_obj, tssRegion = tss_region, annoDb = org_db_pkg, verbose = FALSE)
+      )
       bed_info <- format_annotation_columns(as.data.frame(bed_annot))
       if ("GENENAME" %in% colnames(bed_info)) bed_info <- bed_info %>% dplyr::rename(Gene_description = GENENAME)
-      message("    Refining Target annotation...")
+      log_message("    Refining Target annotation...")
       bed_info <- resolve_gene_conflicts(bed_info, txdb_obj, org_db_pkg, tss_region, gene_expr_map)
       hits <- GenomicRanges::findOverlaps(gr_bed, gr_anchors)
       if (length(hits) > 0) {
@@ -422,54 +446,79 @@ annotate_peaks_and_loops <- function(
 
 
   # Step 6: Visualization
-  message("Step 6: Generating Visualizations (Returning plot objects)...")
+  log_message("Step 6: Generating Visualizations (Returning plot objects)...")
   plot_df <- loop_annotation_final
   plot_df$loop_genes <- plot_df$All_Anchor_Genes
 
-  plot_list <- build_annotation_plots(
-    plot_df = plot_df,
-    bed_info = bed_info,
-    cluster_info = cluster_info,
-    target_connected_loops = target_connected_loops,
-    txdb_obj = txdb_obj,
-    org_db_pkg = org_db_pkg,
-    species = species,
-    project_name = project_name,
-    color_palette = color_palette,
-    karyo_bin_size = karyo_bin_size
-  )
+  plot_list <- if (quiet) {
+    .with_messages_silenced(
+      .with_known_upstream_noise_suppressed(
+        build_annotation_plots(
+          plot_df = plot_df,
+          bed_info = bed_info,
+          cluster_info = cluster_info,
+          target_connected_loops = target_connected_loops,
+          txdb_obj = txdb_obj,
+          org_db_pkg = org_db_pkg,
+          species = species,
+          project_name = project_name,
+          color_palette = color_palette,
+          karyo_bin_size = karyo_bin_size
+        )
+      )
+    )
+  } else {
+    .with_known_upstream_noise_suppressed(
+      build_annotation_plots(
+        plot_df = plot_df,
+        bed_info = bed_info,
+        cluster_info = cluster_info,
+        target_connected_loops = target_connected_loops,
+        txdb_obj = txdb_obj,
+        org_db_pkg = org_db_pkg,
+        species = species,
+        project_name = project_name,
+        color_palette = color_palette,
+        karyo_bin_size = karyo_bin_size
+      )
+    )
+  }
 
-  message("Step 7: Exporting to Excel...")
   loop_annotation_clean <- loop_annotation_final %>% dplyr::select(-any_of(c("a1_id", "a2_id")))
-  wb <- openxlsx::createWorkbook()
-  openxlsx::addWorksheet(wb, "Loop Annotation")
-  openxlsx::writeData(wb, "Loop Annotation", loop_annotation_clean)
-  openxlsx::addWorksheet(wb, "Anchor Annotation")
-  openxlsx::writeData(wb, "Anchor Annotation", cluster_info)
-  openxlsx::addWorksheet(wb, "Promoter Stats")
-  openxlsx::writeData(wb, "Promoter Stats", promoter_centric_df)
-  if (!is.null(distal_element_df)) {
-    openxlsx::addWorksheet(wb, "Distal Element Stats")
-    openxlsx::writeData(wb, "Distal Element Stats", distal_element_df)
+  if (write_output) {
+    log_message("Step 7: Exporting to Excel...")
+    wb <- openxlsx::createWorkbook()
+    openxlsx::addWorksheet(wb, "Loop Annotation")
+    openxlsx::writeData(wb, "Loop Annotation", loop_annotation_clean)
+    openxlsx::addWorksheet(wb, "Anchor Loci Annotation")
+    openxlsx::writeData(wb, "Anchor Loci Annotation", cluster_info)
+    openxlsx::addWorksheet(wb, "Promoter Stats")
+    openxlsx::writeData(wb, "Promoter Stats", promoter_centric_df)
+    if (!is.null(distal_element_df)) {
+      openxlsx::addWorksheet(wb, "Distal Element Stats")
+      openxlsx::writeData(wb, "Distal Element Stats", distal_element_df)
+    }
+    if (!is.null(bed_info)) {
+      openxlsx::addWorksheet(wb, "Target Annotation")
+      openxlsx::writeData(wb, "Target Annotation", bed_info)
+    }
+    tryCatch(
+      openxlsx::saveWorkbook(wb, file.path(out_dir, paste0(project_name, "_Basic_Results.xlsx")), overwrite = TRUE),
+      error = function(e) warning("Failed to save Excel workbook: ", conditionMessage(e), call. = FALSE)
+    )
+    log_message("    Excel file saved.")
   }
-  if (!is.null(bed_info)) {
-    openxlsx::addWorksheet(wb, "Target Annotation")
-    openxlsx::writeData(wb, "Target Annotation", bed_info)
-  }
-  tryCatch(
-    openxlsx::saveWorkbook(wb, file.path(out_dir, paste0(project_name, "_Basic_Results.xlsx")), overwrite = TRUE),
-    error = function(e) warning("Failed to save Excel workbook: ", conditionMessage(e), call. = FALSE)
-  )
-  message("    Excel file saved.")
 
-  message("Analysis Complete.")
+  log_message("Analysis Complete.")
   return(list(
+    anchor_loci_annotation = cluster_info,
     anchor_annotation = cluster_info,
     loop_annotation = loop_annotation_clean,
     promoter_centric_stats = promoter_centric_df,
     distal_element_stats = distal_element_df,
     target_annotation = bed_info,
-    plots = plot_list
+    plots = plot_list,
+    plot_list = plot_list
   ))
 }
 
@@ -539,18 +588,16 @@ build_annotation_plots <- function(
   if ("All_Anchor_Genes" %in% colnames(plot_df)) {
     genes_loop <- clean_gene_names(plot_df$All_Anchor_Genes, ";")
     if (length(genes_loop) > 0) {
-      all_genes_gr <- GenomicFeatures::genes(txdb_obj)
-      org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
-      valid_keys <- AnnotationDbi::keytypes(org_db_obj)
-      primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
-
-      map <- AnnotationDbi::select(
-        org_db_obj,
-        keys = as.character(S4Vectors::mcols(all_genes_gr)$gene_id),
-        columns = "SYMBOL", keytype = primary_key
+      all_genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+      map <- .map_txdb_gene_ids(
+        gene_ids = .extract_txdb_gene_ids(all_genes_gr),
+        org_db = org_db_pkg,
+        columns = "SYMBOL",
+        context = "build_annotation_plots loop-gene karyotype",
+        warn = FALSE
       )
       S4Vectors::mcols(all_genes_gr)$SYMBOL <- map$SYMBOL[match(
-        S4Vectors::mcols(all_genes_gr)$gene_id, map[[primary_key]]
+        .extract_txdb_gene_ids(all_genes_gr), map$gene_id
       )]
       target_genes_gr <- all_genes_gr[S4Vectors::mcols(all_genes_gr)$SYMBOL %in% genes_loop]
       plot_list$Karyo_LoopGenes <- draw_karyo_heatmap_internal(
@@ -567,7 +614,9 @@ build_annotation_plots <- function(
   ) %>% dplyr::distinct()
   if (nrow(all_anchors) > 0) {
     plot_list$Karyo_Anchors <- draw_karyo_heatmap_internal(
-      GenomicRanges::makeGRangesFromDataFrame(all_anchors),
+      .with_known_upstream_noise_suppressed(
+        GenomicRanges::makeGRangesFromDataFrame(all_anchors)
+      ),
       "Loop Anchor Load", karyo_bin_size, 0.99, txdb_obj, species, "Anchors",
       custom_colors = blue_palette
     )
@@ -587,7 +636,7 @@ build_annotation_plots <- function(
   if (nrow(cluster_info) > 0) {
     plot_list$Anchor_Genomic_Distribution <- draw_pie_with_outside_labels(
       cluster_info, "annotation",
-      paste0(project_name, ": All Anchors Genomic Distribution"), color_palette
+      paste0(project_name, ": Anchor Loci Genomic Distribution"), color_palette
     )
   }
 
@@ -595,18 +644,16 @@ build_annotation_plots <- function(
     if ("Assigned_Target_Genes_Filled" %in% colnames(bed_info)) {
       genes_target <- clean_gene_names(bed_info$Assigned_Target_Genes_Filled, ";")
       if (length(genes_target) > 0) {
-        all_genes_gr <- GenomicFeatures::genes(txdb_obj)
-        org_db_obj <- utils::getFromNamespace(org_db_pkg, org_db_pkg)
-        valid_keys <- AnnotationDbi::keytypes(org_db_obj)
-        primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
-
-        map <- AnnotationDbi::select(
-          org_db_obj,
-          keys = as.character(S4Vectors::mcols(all_genes_gr)$gene_id),
-          columns = "SYMBOL", keytype = primary_key
+        all_genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+        map <- .map_txdb_gene_ids(
+          gene_ids = .extract_txdb_gene_ids(all_genes_gr),
+          org_db = org_db_pkg,
+          columns = "SYMBOL",
+          context = "build_annotation_plots target-gene karyotype",
+          warn = FALSE
         )
         S4Vectors::mcols(all_genes_gr)$SYMBOL <- map$SYMBOL[match(
-          S4Vectors::mcols(all_genes_gr)$gene_id, map[[primary_key]]
+          .extract_txdb_gene_ids(all_genes_gr), map$gene_id
         )]
         target_genes_gr <- all_genes_gr[S4Vectors::mcols(all_genes_gr)$SYMBOL %in% genes_target]
         plot_list$Karyo_TargetGenes <- draw_karyo_heatmap_internal(
@@ -693,17 +740,21 @@ build_annotation_plots <- function(
 #' @param karyo_bin_size Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.
 #' @param reclassify_by_expression Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.
 #' @param hub_percentile Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.
+#' @param write_output Logical. If \code{TRUE} (default), write the refined Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.
+#' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
 #'
 #' @return An invisible named list:
 #' \itemize{
 #'   \item \code{loop_annotation} — Filtered 3D network with updated \code{loop_type} (e.g., eP-P).
-#'   \item \code{anchor_annotation} — Cluster annotations with expressed targets.
+#'   \item \code{anchor_loci_annotation} — Filtered non-redundant anchor-locus annotations with expressed targets.
+#'   \item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
 #'   \item \code{promoter_centric_stats} — Gene-level connectivity statistics.
 #'   \item \code{distal_element_stats} — Distal-element connectivity statistics.
 #'   \item \code{target_annotation} — External features linked to active loop components.
-#'   \item \code{plot_list} — Named list of ggplot objects (dumbbell, rose, karyotype).
+#'   \item \code{plots} — Named list of ggplot objects (dumbbell, rose, karyotype).
+#'   \item \code{plot_list} — Backward-compatible alias of \code{plots}.
 #' }
-#' Also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
+#' If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
 #'
 #' @importFrom dplyr %>% filter group_by summarise ungroup mutate select rename left_join full_join arrange desc case_when rowwise coalesce any_of distinct pull
 #' @importFrom ggplot2 ggplot aes geom_bar geom_segment geom_point geom_text scale_color_manual scale_fill_manual theme_minimal theme_void labs coord_polar xlim
@@ -752,25 +803,34 @@ refine_loop_anchors_by_expression <- function(
   color_palette = "Set2",
   karyo_bin_size = 1e5,
   reclassify_by_expression = TRUE,
-  hub_percentile = 0.95
+  hub_percentile = 0.95,
+  write_output = TRUE,
+  quiet = FALSE
 ) {
+  log_message <- function(...) {
+    if (!quiet) message(...)
+  }
+
   # --- 0. Setup ---
   if (!grepl("_Filtered$", project_name)) project_name <- paste0(project_name, "_Filtered")
-  if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
-  message(">>> [Refinement] Project Name: ", project_name)
+  if (write_output && !dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+  log_message(">>> [Refinement] Project Name: ", project_name)
 
   # --- 1. Load Data ---
-  message(">>> [Step 1] Loading Data & Expression Matrix...")
+  log_message(">>> [Step 1] Loading Data & Expression Matrix...")
   if (is.null(annotation_res$loop_annotation)) stop("'loop_annotation' missing.")
 
   original_loop_df <- annotation_res$loop_annotation
   loop_df <- annotation_res$loop_annotation
-  clust_info <- annotation_res$anchor_annotation
+  clust_info <- annotation_res$anchor_loci_annotation
+  if (is.null(clust_info)) {
+    clust_info <- annotation_res$anchor_annotation
+  }
   bed_info <- annotation_res$target_annotation
 
   # Check and reconstruct IDs if missing
   if (!"a1_id" %in% colnames(loop_df) || !"a2_id" %in% colnames(loop_df)) {
-    message("    [Info] 'a1_id'/'a2_id' columns missing. Reconstructing from coordinates...")
+    log_message("    [Info] 'a1_id'/'a2_id' columns missing. Reconstructing from coordinates...")
     loop_df <- loop_df %>%
       dplyr::mutate(
         a1_id = paste(chr1, start1, end1, sep = "_"),
@@ -786,7 +846,7 @@ refine_loop_anchors_by_expression <- function(
   }
   vals <- load_expression_matrix(expr_matrix_file, sample_columns)
   whitelist <- names(vals)[vals > threshold & !is.na(vals) & names(vals) != ""]
-  message(sprintf("    >>> Active Genes (> %s %s): %d", threshold, unit_type, length(whitelist)))
+  log_message(sprintf("    >>> Active Genes (> %s %s): %d", threshold, unit_type, length(whitelist)))
 
   # Warn if whitelist has suspiciously low overlap with annotation genes
   anno_genes <- unique(c(
@@ -808,7 +868,7 @@ refine_loop_anchors_by_expression <- function(
   }
 
   # --- 2. Update Anchors & Loops ---
-  message(">>> [Step 2] Updating Anchors & Loops...")
+  log_message(">>> [Step 2] Updating Anchors & Loops...")
 
   a1_res <- mapply(clean_anchor, loop_df$anchor1_gene, loop_df$anchor1_type,
     MoreArgs = list(allow = whitelist, down = reclassify_by_expression),
@@ -840,7 +900,7 @@ refine_loop_anchors_by_expression <- function(
     dplyr::ungroup()
 
   # --- 3. Stats Update ---
-  message(">>> [Step 3] Updating Stats...")
+  log_message(">>> [Step 3] Updating Stats...")
 
   agg_cluster <- loop_df %>%
     dplyr::filter(!is.na(cluster_id)) %>%
@@ -866,7 +926,7 @@ refine_loop_anchors_by_expression <- function(
   promoter_centric_df <- stats_res$promoter_centric
   distal_element_df <- stats_res$distal_element
 
-  message(">>> [Step 4] Refining Target Annotations...")
+  log_message(">>> [Step 4] Refining Target Annotations...")
   if (!is.null(bed_info)) {
     cols_to_clean <- grep("Strict|Physical|Loop_Genes|promoter|Filled|Target_Genes|Assigned", colnames(bed_info), value = TRUE)
     raw_tgt_col <- "Assigned_Target_Genes_Filled"
@@ -892,55 +952,77 @@ refine_loop_anchors_by_expression <- function(
   }
 
   # --- 5. Visualization ---
-  message(">>> [Step 5] Generating Visualizations (Returning plot objects)...")
-  plot_list <- build_refinement_plots(
-    original_loop_df = original_loop_df,
-    loop_df = loop_df,
-    bed_info = bed_info,
-    whitelist = whitelist,
-    project_name = project_name,
-    karyo_bin_size = karyo_bin_size,
-    species = species
-  )
+  log_message(">>> [Step 5] Generating Visualizations (Returning plot objects)...")
+  plot_list <- if (quiet) {
+    .with_messages_silenced(
+      .with_known_upstream_noise_suppressed(
+        build_refinement_plots(
+          original_loop_df = original_loop_df,
+          loop_df = loop_df,
+          bed_info = bed_info,
+          whitelist = whitelist,
+          project_name = project_name,
+          karyo_bin_size = karyo_bin_size,
+          species = species
+        )
+      )
+    )
+  } else {
+    .with_known_upstream_noise_suppressed(
+      build_refinement_plots(
+        original_loop_df = original_loop_df,
+        loop_df = loop_df,
+        bed_info = bed_info,
+        whitelist = whitelist,
+        project_name = project_name,
+        karyo_bin_size = karyo_bin_size,
+        species = species
+      )
+    )
+  }
 
   # --- 6. Export ---
-  message(">>> [Step 6] Exporting Refined Results...")
-  wb <- openxlsx::createWorkbook()
-  loop_export <- loop_df %>% dplyr::select(-any_of(c("loop_genes", "single_loop_genes", "proximate_loop_gene")))
-  openxlsx::addWorksheet(wb, "Filtered Loop Annotation")
-  openxlsx::writeData(wb, "Filtered Loop Annotation", loop_export)
-  openxlsx::addWorksheet(wb, "Filtered Anchor Annotation")
-  openxlsx::writeData(wb, "Filtered Anchor Annotation", clust_info)
+  if (write_output) {
+    log_message(">>> [Step 6] Exporting Refined Results...")
+    wb <- openxlsx::createWorkbook()
+    loop_export <- loop_df %>% dplyr::select(-any_of(c("loop_genes", "single_loop_genes", "proximate_loop_gene")))
+    openxlsx::addWorksheet(wb, "Filtered Loop Annotation")
+    openxlsx::writeData(wb, "Filtered Loop Annotation", loop_export)
+    openxlsx::addWorksheet(wb, "Filtered Anchor Loci Annotation")
+    openxlsx::writeData(wb, "Filtered Anchor Loci Annotation", clust_info)
 
-  if (!is.null(promoter_centric_df)) {
-    openxlsx::addWorksheet(wb, "Filtered Promoter Stats")
-    openxlsx::writeData(wb, "Filtered Promoter Stats", promoter_centric_df)
+    if (!is.null(promoter_centric_df)) {
+      openxlsx::addWorksheet(wb, "Filtered Promoter Stats")
+      openxlsx::writeData(wb, "Filtered Promoter Stats", promoter_centric_df)
+    }
+    if (!is.null(distal_element_df)) {
+      openxlsx::addWorksheet(wb, "Filtered Distal Stats")
+      openxlsx::writeData(wb, "Filtered Distal Stats", distal_element_df)
+    }
+
+    if (!is.null(bed_info)) {
+      bed_export <- bed_info %>% dplyr::select(-any_of("SANKEY_RAW_GENES"))
+      openxlsx::addWorksheet(wb, "Filtered Target Annotation")
+      openxlsx::writeData(wb, "Filtered Target Annotation", bed_export)
+    }
+
+    tryCatch(
+      openxlsx::saveWorkbook(wb, file.path(out_dir, paste0(project_name, "_Refined_Results.xlsx")), overwrite = TRUE),
+      error = function(e) warning("Failed to save refined Excel workbook: ", conditionMessage(e), call. = FALSE)
+    )
+    log_message("    Excel saved.")
   }
-  if (!is.null(distal_element_df)) {
-    openxlsx::addWorksheet(wb, "Filtered Distal Stats")
-    openxlsx::writeData(wb, "Filtered Distal Stats", distal_element_df)
-  }
 
-  if (!is.null(bed_info)) {
-    bed_export <- bed_info %>% dplyr::select(-any_of("SANKEY_RAW_GENES"))
-    openxlsx::addWorksheet(wb, "Filtered Target Annotation")
-    openxlsx::writeData(wb, "Filtered Target Annotation", bed_export)
-  }
-
-  tryCatch(
-    openxlsx::saveWorkbook(wb, file.path(out_dir, paste0(project_name, "_Refined_Results.xlsx")), overwrite = TRUE),
-    error = function(e) warning("Failed to save refined Excel workbook: ", conditionMessage(e), call. = FALSE)
-  )
-  message("    Excel saved.")
-
-  message("Refinement Complete.")
+  log_message("Refinement Complete.")
   return(list(
     loop_annotation = loop_df,
+    anchor_loci_annotation = clust_info,
     anchor_annotation = clust_info,
     promoter_centric_stats = promoter_centric_df,
     distal_element_stats = distal_element_df,
     target_annotation = bed_info,
-    plots = plot_list
+    plots = plot_list,
+    plot_list = plot_list
   ))
 }
 
@@ -1200,16 +1282,18 @@ build_refinement_plots <- function(
     requireNamespace(txdb_pkg, quietly = TRUE) &&
     requireNamespace(org_db, quietly = TRUE)) {
     txdb_obj <- utils::getFromNamespace(txdb_pkg, txdb_pkg)
-    all_genes <- GenomicFeatures::genes(txdb_obj)
-    org_db_obj <- utils::getFromNamespace(org_db, org_db)
-    valid_keys <- AnnotationDbi::keytypes(org_db_obj)
-    primary_key <- if ("ENTREZID" %in% valid_keys) "ENTREZID" else valid_keys[1]
-
-    map <- AnnotationDbi::select(org_db_obj,
-      keys = as.character(all_genes$gene_id),
-      columns = "SYMBOL", keytype = primary_key
+    all_genes <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+    map <- .map_txdb_gene_ids(
+      gene_ids = .extract_txdb_gene_ids(all_genes),
+      org_db = org_db,
+      columns = "SYMBOL",
+      context = "refine_loop_anchors_by_expression karyotype",
+      warn = FALSE
     )
-    all_genes$SYMBOL <- map$SYMBOL[match(all_genes$gene_id, map[[primary_key]])]
+    all_genes <- .with_known_upstream_noise_suppressed({
+      all_genes$SYMBOL <- map$SYMBOL[match(.extract_txdb_gene_ids(all_genes), map$gene_id)]
+      all_genes
+    })
     g_active <- clean_gene_names(loop_df$Putative_Target_Genes, ";")
     if (length(g_active) > 0) {
       plot_list$Refined_Karyo_Active <- draw_karyo_heatmap_internal(

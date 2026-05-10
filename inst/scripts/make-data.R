@@ -103,8 +103,11 @@
 #   project_name = "Example_HiChIP_Integrative"
 # )
 #
-# # Save the output for downstream testing
-# save(res_integrated, file = "inst/extdata/analysis_results.RData")
+# # Save the output for downstream testing.
+# # Note: `compress = "xz"` reduces package size substantially while remaining
+# # fully compatible with the usual `load("inst/extdata/analysis_results.RData")`
+# # workflow used in examples, tests, and vignettes.
+# save(res_integrated, file = "inst/extdata/analysis_results.RData", compress = "xz")
 # }
 # ```
 #
@@ -134,9 +137,10 @@
 # target_genes <- res_integrated$target_annotation$SYMBOL
 # tpm <- full_tpm[row.names(full_tpm) %in% target_genes, 1:4, drop = FALSE]
 # colnames(tpm) <- c("con1", "con2", "trt1", "trt2")
+# tpm <- cbind(Gene = row.names(tpm), tpm)
 #
 # write.table(tpm, "inst/extdata/example_tpm.txt",
-#             quote = FALSE, row.names = TRUE, col.names = TRUE, sep = "\t")
+#             quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
 #
 # # 3. Subset and clean DESeq2 results
 # deg <- full_deg[full_deg$Gene_name %in% target_genes, c(5, 17:19)]
@@ -145,12 +149,13 @@
 #
 # row.names(deg) <- deg$Gene_name
 # deg <- deg[, -1]
+# deg <- cbind(Gene = row.names(deg), deg)
 #
 # write.table(deg, "inst/extdata/example_deg.txt",
-#             quote = FALSE, row.names = TRUE, col.names = TRUE, sep = "\t")
+#             quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")
 # ```
 # 4. Subset Sample Metadata
 # full_coldata <- read.delim("raw_data/Full_coldata.txt")
-# coldata <- full_coldata[full_coldata$SampleID %in% colnames(tpm), ]
+# coldata <- full_coldata[full_coldata$SampleID %in% colnames(tpm)[-1], ]
 # write.table(coldata, "inst/extdata/example_coldata.txt",
 #             quote = FALSE, row.names = FALSE, col.names = TRUE, sep = "\t")

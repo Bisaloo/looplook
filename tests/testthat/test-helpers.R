@@ -42,16 +42,41 @@ test_that("load_expression_matrix loads and averages correctly", {
   )
   expect_error(
     looplook:::load_expression_matrix(tmp, "badcol"),
-    "No valid sample columns"
+    "Requested sample columns not found"
+  )
+  expect_error(
+    looplook:::load_expression_matrix(tmp, c("con1", "con1")),
+    "`sample_columns` contains duplicates"
+  )
+
+  unlink(tmp)
+})
+
+test_that("load_expression_matrix errors on duplicated expression column names", {
+  tmp <- tempfile(fileext = ".tsv")
+  writeLines(
+    c(
+      "Gene\tcon1\tcon1\ttrt1",
+      "TP53\t10\t15\t100",
+      "BRCA1\t20\t25\t200"
+    ),
+    tmp
+  )
+
+  expect_error(
+    looplook:::load_expression_matrix(tmp, c("con1", "trt1")),
+    "duplicated sample column names"
   )
 
   unlink(tmp)
 })
 
 test_that("get_colors returns expected vector lengths and fallbacks", {
-  expect_length(looplook:::get_colors(0, "Set2"), 0)
-  expect_length(looplook:::get_colors(5, "Set2"), 5)
-  expect_length(looplook:::get_colors(10, c("#E41A1C", "#377EB8")), 10)
+  expect_no_warning(expect_length(looplook:::get_colors(0, "Set2"), 0))
+  expect_no_warning(expect_length(looplook:::get_colors(1, "Set2"), 1))
+  expect_no_warning(expect_length(looplook:::get_colors(2, "Set2"), 2))
+  expect_no_warning(expect_length(looplook:::get_colors(5, "Set2"), 5))
+  expect_no_warning(expect_length(looplook:::get_colors(10, c("#E41A1C", "#377EB8")), 10))
   # auto-generate when NULL/empty
   cols <- looplook:::get_colors(6, NULL)
   expect_length(cols, 6)
@@ -97,4 +122,45 @@ test_that("clean_anchor filters and reclassifies correctly", {
   res4 <- looplook:::clean_anchor("", "E", c("TP53"), FALSE)
   expect_equal(res4$type, "E")
   expect_true(is.na(res4$gene))
+})
+
+test_that(".map_txdb_gene_ids infers OrgDb keytypes for TxDb-like gene IDs", {
+  skip_if_not_installed("org.Hs.eg.db")
+  org_db <- org.Hs.eg.db::org.Hs.eg.db
+
+  entrez_ids <- head(AnnotationDbi::keys(org_db, keytype = "ENTREZID"), 5)
+  ensembl_ids <- head(AnnotationDbi::keys(org_db, keytype = "ENSEMBL"), 5)
+
+  entrez_map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+    gene_ids = entrez_ids,
+    org_db = org_db,
+    columns = "SYMBOL",
+    warn = FALSE
+  ))
+  ensembl_map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+    gene_ids = ensembl_ids,
+    org_db = org_db,
+    columns = "SYMBOL",
+    warn = FALSE
+  ))
+
+  expect_identical(attr(entrez_map, "keytype"), "ENTREZID")
+  expect_identical(attr(ensembl_map, "keytype"), "ENSEMBL")
+  expect_true(any(!is.na(entrez_map$SYMBOL)))
+  expect_true(any(!is.na(ensembl_map$SYMBOL)))
+})
+
+test_that(".map_txdb_gene_ids safely falls back when no OrgDb keytype matches", {
+  skip_if_not_installed("org.Hs.eg.db")
+
+  map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+    gene_ids = c("not_a_real_gene_1", "still_not_real_2"),
+    org_db = org.Hs.eg.db::org.Hs.eg.db,
+    columns = "SYMBOL",
+    warn = FALSE
+  ))
+
+  expect_true(is.na(attr(map, "keytype")))
+  expect_identical(attr(map, "hit_rate"), 0)
+  expect_true(all(is.na(map$SYMBOL)))
 })
