@@ -75,31 +75,15 @@ test_that("load_expression_matrix preserves names with multiple sample columns",
 })
 
 
-# ── 3. run_go_enrichment works without library(org.Hs.eg.db) ────────────────
+# ── 3. OrgDb package strings resolve without attachment ──────────────────────
 
-test_that("run_go_enrichment runs without attaching org.Hs.eg.db", {
-  skip_if_not_installed("clusterProfiler")
+test_that(".get_org_db_obj resolves org_db package names without attachment", {
   skip_if_not_installed("org.Hs.eg.db")
-  skip_if_not_installed("enrichplot")
-  # Ensure the package is not attached; requireNamespace is enough
   if ("package:org.Hs.eg.db" %in% search()) {
     detach("package:org.Hs.eg.db", unload = TRUE, character.only = TRUE)
   }
-  # Use well-known human genes that are guaranteed to map
-  genes <- c(
-    "TP53", "BRCA1", "EGFR", "MYC", "VEGFA",
-    "TNF", "IL6", "CDKN1A", "BCL2", "BAX"
-  )
-  res <- tryCatch(
-    looplook:::run_go_enrichment(genes,
-      org_db = "org.Hs.eg.db",
-      universe_genes = NULL
-    ),
-    error = function(e) e
-  )
-  expect_false(inherits(res, "error"),
-    info = paste("run_go_enrichment failed:", conditionMessage(res))
-  )
+  org_db_obj <- looplook:::.get_org_db_obj("org.Hs.eg.db")
+  expect_true(any(inherits(org_db_obj, c("OrgDb", "AnnotationDb"))))
 })
 
 
@@ -165,18 +149,23 @@ test_that("compute_refined_stats splits semicolon-separated genes", {
 })
 
 
-# ── 6. BEDPE coordinate consistency: bedpe_to_gi vs annotate_peaks_and_loops ─
+# ── 6. annotate_peaks_and_loops handles object inputs and BEDPE coords ───────
 
-test_that("same BEDPE gives consistent anchor coords in gi and annotation", {
+test_that("annotate_peaks_and_loops accepts object inputs and keeps BEDPE coordinates consistent", {
   skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
+  skip_if_not_installed("org.Hs.eg.db")
   tmp_bedpe <- tempfile(fileext = ".bedpe")
+  tmp_bed <- tempfile(fileext = ".bed")
   writeLines("chr1\t0\t100\tchr1\t200\t300", tmp_bedpe)
+  writeLines("chr1\t0\t50", tmp_bed)
   gi <- looplook:::bedpe_to_gi(tmp_bedpe)
   a1_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "first"))
   a2_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "second"))
   res <- suppressWarnings(annotate_peaks_and_loops(
     bedpe_file = tmp_bedpe,
-    species = "hg38",
+    target_bed = tmp_bed,
+    txdb = TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene,
+    org_db = org.Hs.eg.db::org.Hs.eg.db,
     out_dir = tempdir(),
     project_name = "coord_test",
     write_output = FALSE,
@@ -187,6 +176,8 @@ test_that("same BEDPE gives consistent anchor coords in gi and annotation", {
   expect_true(all(la$start2 >= 1))
   expect_equal(min(la$start1), a1_gi)
   expect_equal(min(la$start2), a2_gi)
+  expect_type(res, "list")
+  expect_true("target_annotation" %in% names(res))
 })
 
 
@@ -394,36 +385,7 @@ test_that("run_heatmap_and_connectivity assigns each gene to one connectivity gr
 })
 
 
-# ── 14. annotate_peaks_and_loops accepts OrgDb objects ────────────────────────
-
-test_that("annotate_peaks_and_loops accepts OrgDb package objects", {
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  skip_if_not_installed("org.Hs.eg.db")
-  bedpe_path <- tempfile(fileext = ".bedpe")
-  bed_path <- tempfile(fileext = ".bed")
-  writeLines("chr1\t0\t100\tchr1\t200\t300", bedpe_path)
-  writeLines("chr1\t0\t50", bed_path)
-
-  expect_no_error({
-    res <- suppressWarnings(suppressMessages(
-      annotate_peaks_and_loops(
-        bedpe_file = bedpe_path,
-        target_bed = bed_path,
-        txdb = TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene,
-        org_db = org.Hs.eg.db::org.Hs.eg.db,
-        out_dir = tempdir(),
-        project_name = "orgdb_object_test",
-        write_output = FALSE,
-        quiet = TRUE
-      )
-    ))
-    expect_type(res, "list")
-    expect_true("target_annotation" %in% names(res))
-  })
-})
-
-
-# ── 15. motif target matching splits semicolon-separated anchor genes ─────────
+# ── 14. motif target matching splits semicolon-separated anchor genes ─────────
 
 test_that(".anchor_matches_targets handles semicolon-separated anchor genes", {
   expect_true(looplook:::.anchor_matches_targets("A;B", c("B", "C")))

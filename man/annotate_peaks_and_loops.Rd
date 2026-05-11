@@ -96,21 +96,23 @@ To address complex loci where a single anchor overlaps multiple promoters (e.g.,
 }
 }
 \examples{
-# Mini example files (smaller subset for fast package checks)
+# Minimal runnable example for package checks
 if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
   requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  bedpe_path <- system.file("extdata", "example_loops_mini.bedpe", package = "looplook")
-  bed_path <- system.file("extdata", "example_peaks_mini.bed", package = "looplook")
+  bedpe_path <- tempfile(fileext = ".bedpe")
+  writeLines(
+    "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+    bedpe_path
+  )
 
   res <- annotate_peaks_and_loops(
     bedpe_file = bedpe_path,
-    target_bed = bed_path,
     species = "hg38",
-    tss_region = c(-2000, 2000),
     out_dir = tempdir(),
-    neighbor_hop = 0,
-    project_name = "Quick_Example"
+    project_name = "Quick_Example",
+    write_output = FALSE,
+    quiet = TRUE
   )
-  head(res$target_annotation)
+  head(res$loop_annotation)
 }
 }

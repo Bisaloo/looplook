@@ -1005,6 +1005,8 @@ draw_karyo_heatmap_internal <- function(gr_data, title_prefix, bin_size, sat_lev
 #'
 #' @param x A \code{looplook_karyo} object.
 #' @param ... Additional arguments (unused).
+#' @return The input \code{looplook_karyo} object, returned invisibly after
+#'   drawing the image.
 #' @export
 print.looplook_karyo <- function(x, ...) {
   if (!is.null(x$png_raw)) {

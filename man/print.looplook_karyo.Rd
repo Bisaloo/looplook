@@ -11,6 +11,10 @@
 
 \item{...}{Additional arguments (unused).}
 }
+\value{
+The input \code{looplook_karyo} object, returned invisibly after
+drawing the image.
+}
 \description{
 Displays a previously captured karyotype heatmap. Uses embedded PNG bytes
 when available, otherwise falls back to a file-backed image.

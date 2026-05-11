@@ -88,6 +88,10 @@ temp_env <- new.env()
 load(rdata_path, envir = temp_env)
 # Extract the first object found in the RData file
 raw_annotation <- temp_env[[ls(temp_env)[1]]]
+raw_annotation$loop_annotation <- head(raw_annotation$loop_annotation, 12)
+raw_annotation$target_annotation <- head(raw_annotation$target_annotation, 6)
+raw_annotation$promoter_centric_stats <- head(raw_annotation$promoter_centric_stats, 12)
+raw_annotation$distal_element_stats <- head(raw_annotation$distal_element_stats, 12)
 
 # =========================================================================
 # Example : Advanced filtering WITH Transcriptome-Guided Reclassification
@@ -101,7 +105,9 @@ res_reclassified <- refine_loop_anchors_by_expression(
   species = "hg38",
   out_dir = tempdir(),
   project_name = "Example_Reclassified",
-  reclassify_by_expression = TRUE
+  reclassify_by_expression = TRUE,
+  write_output = FALSE,
+  quiet = TRUE
 )
 
 # View the biologically corrected loop types (e.g., transition from P-P to eP-P)

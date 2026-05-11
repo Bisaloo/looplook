@@ -376,11 +376,13 @@ prepare_track_data <- function(
 #' @examples
 #' if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
 #'   requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-#'   bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-#'   bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
+#'   bedpe_path <- tempfile(fileext = ".bedpe")
+#'   writeLines(
+#'     "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+#'     bedpe_path
+#'   )
 #'   p <- plot_peaks_interactions(
 #'     bedpe_file = bedpe_path,
-#'     target_bed = bed_path,
 #'     chr = "chr1",
 #'     from = 11884299,
 #'     to = 12106581,

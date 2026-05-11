@@ -144,11 +144,20 @@ results.
 \examples{
 if (requireNamespace("rmarkdown", quietly = TRUE) &&
   requireNamespace("knitr", quietly = TRUE)) {
+  temp_env <- new.env()
+  load(system.file("extdata", "analysis_results.RData", package = "looplook"), envir = temp_env)
+  precomputed_res <- temp_env[[ls(temp_env)[1]]]
+  precomputed_res$loop_annotation <- head(precomputed_res$loop_annotation, 12)
+  precomputed_res$target_annotation <- head(precomputed_res$target_annotation, 6)
+  precomputed_res$promoter_centric_stats <- head(precomputed_res$promoter_centric_stats, 12)
+  precomputed_res$distal_element_stats <- head(precomputed_res$distal_element_stats, 12)
+
   report_path <- looplook_report(
-    precomputed_res = system.file("extdata", "analysis_results.RData", package = "looplook"),
+    precomputed_res = precomputed_res,
     expr_matrix_file = system.file("extdata", "example_tpm.txt", package = "looplook"),
     diff_file = system.file("extdata", "example_deg.txt", package = "looplook"),
     metadata_file = system.file("extdata", "example_coldata.txt", package = "looplook"),
+    target_source = "loops",
     project_name = "Example",
     out_dir = tempdir(),
     output_file = "looplook-example-report.html",
@@ -156,9 +165,9 @@ if (requireNamespace("rmarkdown", quietly = TRUE) &&
     run_go = FALSE,
     run_ppi = FALSE,
     run_motif = FALSE,
-    heatmap_nSample = 20,
-    gsea_nSample = 20,
-    cnet_nSample = 5
+    heatmap_nSample = 10,
+    gsea_nSample = 10,
+    cnet_nSample = 3
   )
   file.exists(report_path)
 }
