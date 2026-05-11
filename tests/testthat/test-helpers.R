@@ -131,18 +131,18 @@ test_that(".map_txdb_gene_ids infers OrgDb keytypes for TxDb-like gene IDs", {
   entrez_ids <- head(AnnotationDbi::keys(org_db, keytype = "ENTREZID"), 5)
   ensembl_ids <- head(AnnotationDbi::keys(org_db, keytype = "ENSEMBL"), 5)
 
-  entrez_map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+  entrez_map <- looplook:::.map_txdb_gene_ids(
     gene_ids = entrez_ids,
     org_db = org_db,
     columns = "SYMBOL",
     warn = FALSE
-  ))
-  ensembl_map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+  )
+  ensembl_map <- looplook:::.map_txdb_gene_ids(
     gene_ids = ensembl_ids,
     org_db = org_db,
     columns = "SYMBOL",
     warn = FALSE
-  ))
+  )
 
   expect_identical(attr(entrez_map, "keytype"), "ENTREZID")
   expect_identical(attr(ensembl_map, "keytype"), "ENSEMBL")
@@ -153,12 +153,12 @@ test_that(".map_txdb_gene_ids infers OrgDb keytypes for TxDb-like gene IDs", {
 test_that(".map_txdb_gene_ids safely falls back when no OrgDb keytype matches", {
   skip_if_not_installed("org.Hs.eg.db")
 
-  map <- suppressWarnings(looplook:::.map_txdb_gene_ids(
+  map <- looplook:::.map_txdb_gene_ids(
     gene_ids = c("not_a_real_gene_1", "still_not_real_2"),
     org_db = org.Hs.eg.db::org.Hs.eg.db,
     columns = "SYMBOL",
     warn = FALSE
-  ))
+  )
 
   expect_true(is.na(attr(map, "keytype")))
   expect_identical(attr(map, "hit_rate"), 0)

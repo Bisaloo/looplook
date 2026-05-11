@@ -1371,27 +1371,20 @@ run_distal_motif_analysis <- function(
 #'   temp_env <- new.env()
 #'   load(system.file("extdata", "analysis_results.RData", package = "looplook"), envir = temp_env)
 #'   precomputed_res <- temp_env[[ls(temp_env)[1]]]
-#'   precomputed_res$loop_annotation <- head(precomputed_res$loop_annotation, 12)
-#'   precomputed_res$target_annotation <- head(precomputed_res$target_annotation, 6)
-#'   precomputed_res$promoter_centric_stats <- head(precomputed_res$promoter_centric_stats, 12)
-#'   precomputed_res$distal_element_stats <- head(precomputed_res$distal_element_stats, 12)
+#'   precomputed_res$loop_annotation <- head(precomputed_res$loop_annotation, 6)
+#'   precomputed_res$target_annotation <- head(precomputed_res$target_annotation, 3)
+#'   precomputed_res$promoter_centric_stats <- head(precomputed_res$promoter_centric_stats, 6)
+#'   precomputed_res$distal_element_stats <- head(precomputed_res$distal_element_stats, 6)
 #'
 #'   report_path <- looplook_report(
 #'     precomputed_res = precomputed_res,
-#'     expr_matrix_file = system.file("extdata", "example_tpm.txt", package = "looplook"),
-#'     diff_file = system.file("extdata", "example_deg.txt", package = "looplook"),
-#'     metadata_file = system.file("extdata", "example_coldata.txt", package = "looplook"),
-#'     target_source = "loops",
 #'     project_name = "Example",
 #'     out_dir = tempdir(),
 #'     output_file = "looplook-example-report.html",
 #'     quiet = TRUE,
 #'     run_go = FALSE,
 #'     run_ppi = FALSE,
-#'     run_motif = FALSE,
-#'     heatmap_nSample = 10,
-#'     gsea_nSample = 10,
-#'     cnet_nSample = 3
+#'     run_motif = FALSE
 #'   )
 #'   file.exists(report_path)
 #' }

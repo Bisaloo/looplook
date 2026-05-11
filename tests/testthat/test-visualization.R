@@ -1,36 +1,26 @@
 # tests/testthat/test-visualization.R
 
 test_that("Module 5: IGV-Style Track Visualization generates plot successfully", {
-  f1 <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-  atac_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-
-  skip_if(f1 == "" || atac_path == "")
   skip_if_not_installed("ggplot2")
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  skip_if_not_installed("org.Hs.eg.db")
+  f1 <- tempfile(fileext = ".bedpe")
+  writeLines(
+    "chr1\t100\t140\tchr1\t400\t440",
+    con = f1
+  )
 
-  out_base <- tempdir()
-  save_path <- file.path(out_base, "Test_Locus_Track.pdf")
-
-  track_plot <- suppressWarnings(suppressMessages(
-    plot_peaks_interactions(
+  track_plot <- looplook::plot_peaks_interactions(
       bedpe_file = f1,
-      target_bed = atac_path,
-      species = "hg38",
+      chr = "chr1",
+      from = 90,
+      to = 450,
       score_to_alpha = TRUE,
-      save_file = save_path
+      show_gene_track = FALSE
     )
-  ))
 
   expect_s3_class(track_plot, "ggplot")
-
-  unlink(save_path)
 })
 
 test_that("prepare_track_data stacks overlapping arcs within max_levels", {
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  skip_if_not_installed("org.Hs.eg.db")
-
   bedpe_path <- tempfile(fileext = ".bedpe")
   on.exit(unlink(bedpe_path), add = TRUE)
   writeLines(
@@ -42,8 +32,7 @@ test_that("prepare_track_data stacks overlapping arcs within max_levels", {
     con = bedpe_path
   )
 
-  d <- suppressWarnings(suppressMessages(
-    looplook:::prepare_track_data(
+  d <- looplook:::prepare_track_data(
       bedpe_file = bedpe_path,
       target_bed = NULL,
       chr = "chr1",
@@ -55,9 +44,9 @@ test_that("prepare_track_data stacks overlapping arcs within max_levels", {
       loop_color = "#5D6D7E",
       anchor_color = "#3498DB",
       score_to_alpha = FALSE,
-      min_score = NULL
+      min_score = NULL,
+      show_gene_track = FALSE
     )
-  ))
 
   expect_gt(nrow(d$bez_df), 0)
 

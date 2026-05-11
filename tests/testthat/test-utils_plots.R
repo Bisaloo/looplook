@@ -30,7 +30,7 @@ test_that("Utility drawing functions render successfully with mock data", {
 
   proj <- "Test_Project"
 
-  suppressWarnings({
+  looplook:::.with_known_upstream_noise_suppressed({
     expect_s3_class(looplook:::draw_target_loop_donut(mock_loop, proj, NULL, mock_colors), "ggplot")
     expect_s3_class(looplook:::draw_target_annotation_pie(mock_target, proj, NULL), "ggplot")
     expect_s3_class(looplook:::draw_rose_plot(mock_loop, proj, NULL, mock_colors), "ggplot")

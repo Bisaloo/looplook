@@ -23,8 +23,28 @@
 prepare_track_data <- function(
   bedpe_file, target_bed, chr, from, to, species,
   max_levels, base_anchor_height, loop_color, anchor_color, score_to_alpha,
-  min_score
+  min_score, txdb = NULL, org_db = NULL, show_gene_track = TRUE
 ) {
+  .resolve_annotation_db <- function(arg, species_map, desc) {
+    if (any(inherits(arg, c("TxDb", "OrgDb", "AnnotationDb")))) {
+      return(arg)
+    }
+    if (is.character(arg) && length(arg) == 1L && nzchar(arg)) {
+      if (!requireNamespace(arg, quietly = TRUE)) {
+        stop(desc, " '", arg, "' not installed")
+      }
+      return(utils::getFromNamespace(arg, arg))
+    }
+    pkg <- species_map[[species]]
+    if (is.null(pkg)) {
+      stop("Species not supported: ", species)
+    }
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      stop(desc, " '", pkg, "' not installed")
+    }
+    utils::getFromNamespace(pkg, pkg)
+  }
+
   .scale_group_positions <- function(values, groups) {
     out <- numeric(length(values))
     idx_split <- split(seq_along(values), groups)
@@ -87,21 +107,31 @@ prepare_track_data <- function(
     )
   }
 
-  # Species config
-  species_map <- list(
-    hg38 = c("TxDb.Hsapiens.UCSC.hg38.knownGene", "org.Hs.eg.db"),
-    hg19 = c("TxDb.Hsapiens.UCSC.hg19.knownGene", "org.Hs.eg.db"),
-    mm10 = c("TxDb.Mmusculus.UCSC.mm10.knownGene", "org.Mm.eg.db"),
-    mm9  = c("TxDb.Mmusculus.UCSC.mm9.knownGene", "org.Mm.eg.db")
-  )
-  cfg <- species_map[[species]]
-  if (is.null(cfg)) stop("Species not supported: ", species)
-  txdb_pkg <- cfg[1]
-  org_db_pkg <- cfg[2]
-
-  if (!requireNamespace(txdb_pkg, quietly = TRUE)) stop("Please install ", txdb_pkg)
-  if (!requireNamespace(org_db_pkg, quietly = TRUE)) stop("Please install ", org_db_pkg)
-  txdb <- utils::getFromNamespace(txdb_pkg, txdb_pkg)
+  txdb_obj <- NULL
+  org_db_ref <- NULL
+  if (isTRUE(show_gene_track)) {
+    tx_species <- list(
+      hg38 = "TxDb.Hsapiens.UCSC.hg38.knownGene",
+      hg19 = "TxDb.Hsapiens.UCSC.hg19.knownGene",
+      mm10 = "TxDb.Mmusculus.UCSC.mm10.knownGene",
+      mm9 = "TxDb.Mmusculus.UCSC.mm9.knownGene"
+    )
+    org_species <- list(
+      hg38 = "org.Hs.eg.db",
+      hg19 = "org.Hs.eg.db",
+      mm10 = "org.Mm.eg.db",
+      mm9 = "org.Mm.eg.db"
+    )
+    txdb_obj <- .resolve_annotation_db(txdb, tx_species, "TxDb")
+    if (!is.null(org_db)) {
+      org_db_ref <- .resolve_annotation_db(org_db, org_species, "OrgDb")
+    } else {
+      org_db_ref <- tryCatch(
+        .resolve_annotation_db(NULL, org_species, "OrgDb"),
+        error = function(e) NULL
+      )
+    }
+  }
 
   # Read BEDPE (0-based) and convert to 1-based for internal use
   loops_raw <- as.data.frame(data.table::fread(bedpe_file, header = FALSE))
@@ -248,24 +278,28 @@ prepare_track_data <- function(
     if (nrow(overlap_df_plot) == 0) overlap_df_plot <- NULL
   }
 
-  # Gene annotation
-  genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb))
-  genes_df <- as.data.frame(genes_gr) %>%
-    dplyr::filter(as.character(seqnames) == chr, end > from, start < to)
-
   feature_df <- data.frame()
+  genes_df <- data.frame()
+  if (isTRUE(show_gene_track)) {
+    genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+    genes_df <- as.data.frame(genes_gr) %>%
+      dplyr::filter(as.character(seqnames) == chr, end > from, start < to)
+  }
+
   if (nrow(genes_df) > 0) {
     try(
       {
-        symbol_map <- .map_txdb_gene_ids(
-          gene_ids = unique(as.character(genes_df$gene_id)),
-          org_db = org_db_pkg,
-          columns = "SYMBOL",
-          context = "prepare_genomic_plot_data gene track",
-          warn = TRUE
-        )
-        symbol_map <- symbol_map[!duplicated(symbol_map$gene_id), ]
-        genes_df <- dplyr::left_join(genes_df, symbol_map, by = "gene_id")
+        if (!is.null(org_db_ref)) {
+          symbol_map <- .map_txdb_gene_ids(
+            gene_ids = unique(as.character(genes_df$gene_id)),
+            org_db = org_db_ref,
+            columns = "SYMBOL",
+            context = "prepare_genomic_plot_data gene track",
+            warn = TRUE
+          )
+          symbol_map <- symbol_map[!duplicated(symbol_map$gene_id), ]
+          genes_df <- dplyr::left_join(genes_df, symbol_map, by = "gene_id")
+        }
       },
       silent = TRUE
     )
@@ -281,18 +315,18 @@ prepare_track_data <- function(
       IRanges::IRanges(genes_df$start, genes_df$end)
     )
 
-    tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb)) {
+    tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb_obj)) {
       "TXNAME"
     } else {
       "TXID"
     }
-    tx2gene <- AnnotationDbi::select(txdb,
-      keys = AnnotationDbi::keys(txdb, tx_keytype),
+    tx2gene <- AnnotationDbi::select(txdb_obj,
+      keys = AnnotationDbi::keys(txdb_obj, tx_keytype),
       columns = "GENEID", keytype = tx_keytype
     )
     colnames(tx2gene) <- c("tx_id", "gene_id")
 
-    exons_list <- GenomicFeatures::exonsBy(txdb, "tx", use.names = TRUE)
+    exons_list <- GenomicFeatures::exonsBy(txdb_obj, "tx", use.names = TRUE)
     exons_gr <- unlist(exons_list)
     names(exons_gr) <- NULL
     exons_flat <- as.data.frame(exons_gr)
@@ -343,6 +377,14 @@ prepare_track_data <- function(
 #' @param from Numeric. Start coordinate of the region to plot.
 #' @param to Numeric. End coordinate of the region to plot.
 #' @param species Character. Genome assembly: "hg38", "hg19", "mm10", or "mm9".
+#' @param txdb Optional \code{TxDb} object or installed package name. When
+#'   \code{NULL}, looplook resolves a species-matched transcript annotation.
+#' @param org_db Optional \code{OrgDb}/\code{AnnotationDb} object or installed
+#'   package name used for gene-symbol mapping. When \code{NULL}, looplook
+#'   attempts species-matched mapping and otherwise falls back to \code{gene_id}.
+#' @param show_gene_track Logical. If \code{TRUE} (default), render the gene
+#'   track using the resolved \code{txdb}. Set to \code{FALSE} for a lightweight
+#'   loops-only view that skips transcript annotation.
 #' @param max_levels Integer. Maximum number of visible vertical levels for loop
 #'   arc stacking (default: 10). Overlapping loops are separated into stacked
 #'   bands up to this limit; denser regions are compressed into the available
@@ -374,22 +416,19 @@ prepare_track_data <- function(
 #' @importFrom AnnotationDbi keys keytypes
 #' @export
 #' @examples
-#' if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
-#'   requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-#'   bedpe_path <- tempfile(fileext = ".bedpe")
-#'   writeLines(
-#'     "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
-#'     bedpe_path
-#'   )
-#'   p <- plot_peaks_interactions(
-#'     bedpe_file = bedpe_path,
-#'     chr = "chr1",
-#'     from = 11884299,
-#'     to = 12106581,
-#'     species = "hg38"
-#'   )
-#'   print(p)
-#' }
+#' bedpe_path <- tempfile(fileext = ".bedpe")
+#' writeLines(
+#'   "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+#'   bedpe_path
+#' )
+#' p <- plot_peaks_interactions(
+#'   bedpe_file = bedpe_path,
+#'   chr = "chr1",
+#'   from = 11884299,
+#'   to = 12106581,
+#'   show_gene_track = FALSE
+#' )
+#' print(p)
 plot_peaks_interactions <- function(
   bedpe_file,
   target_bed = NULL,
@@ -397,6 +436,9 @@ plot_peaks_interactions <- function(
   from = NULL,
   to = NULL,
   species = "hg38",
+  txdb = NULL,
+  org_db = NULL,
+  show_gene_track = TRUE,
   max_levels = 10,
   base_anchor_height = 0.05,
   loop_color = "#5D6D7E",
@@ -411,7 +453,10 @@ plot_peaks_interactions <- function(
   d <- prepare_track_data(
     bedpe_file, target_bed, chr, from, to, species,
     max_levels, base_anchor_height, loop_color, anchor_color,
-    score_to_alpha, min_score
+    score_to_alpha, min_score,
+    txdb = txdb,
+    org_db = org_db,
+    show_gene_track = show_gene_track
   )
 
   chr <- d$chr

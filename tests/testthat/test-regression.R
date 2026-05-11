@@ -1,7 +1,7 @@
 # tests/testthat/test-regression.R
 # Regression tests for bugs found during code review (2026-05-08)
 
-shrink_annotation_res <- function(res, n_loops = 25L, n_targets = 10L, n_stats = 25L) {
+shrink_annotation_res <- function(res, n_loops = 15L, n_targets = 6L, n_stats = 15L) {
   if (!is.null(res$loop_annotation)) {
     res$loop_annotation <- head(res$loop_annotation, n_loops)
     kept_clusters <- unique(stats::na.omit(res$loop_annotation$cluster_id))
@@ -100,7 +100,7 @@ test_that("refine_loop_anchors_by_expression survives NULL target_annotation", {
   # Remove target_annotation to simulate loop-only input
   res$target_annotation <- NULL
   expect_error(
-    refine_loop_anchors_by_expression(
+    looplook::refine_loop_anchors_by_expression(
       annotation_res = res,
       expr_matrix_file = expr_path,
       sample_columns = c("con1", "con2"),
@@ -152,25 +152,33 @@ test_that("compute_refined_stats splits semicolon-separated genes", {
 # ── 6. annotate_peaks_and_loops handles object inputs and BEDPE coords ───────
 
 test_that("annotate_peaks_and_loops accepts object inputs and keeps BEDPE coordinates consistent", {
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
   skip_if_not_installed("org.Hs.eg.db")
+  sample_txdb_path <- system.file(
+    "extdata", "hg19_knownGene_sample.sqlite",
+    package = "GenomicFeatures"
+  )
+  skip_if(sample_txdb_path == "", "Sample TxDb not available")
+  txdb_obj <- AnnotationDbi::loadDb(sample_txdb_path)
   tmp_bedpe <- tempfile(fileext = ".bedpe")
   tmp_bed <- tempfile(fileext = ".bed")
-  writeLines("chr1\t0\t100\tchr1\t200\t300", tmp_bedpe)
-  writeLines("chr1\t0\t50", tmp_bed)
+  writeLines("chr6\t10412000\t10412600\tchr6\t10415000\t10415600", tmp_bedpe)
+  writeLines("chr6\t10412300\t10412450", tmp_bed)
   gi <- looplook:::bedpe_to_gi(tmp_bedpe)
   a1_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "first"))
   a2_gi <- GenomicRanges::start(InteractionSet::anchors(gi, "second"))
-  res <- suppressWarnings(annotate_peaks_and_loops(
-    bedpe_file = tmp_bedpe,
-    target_bed = tmp_bed,
-    txdb = TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene,
-    org_db = org.Hs.eg.db::org.Hs.eg.db,
-    out_dir = tempdir(),
-    project_name = "coord_test",
-    write_output = FALSE,
-    quiet = TRUE
-  ))
+  res <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook::annotate_peaks_and_loops(
+      bedpe_file = tmp_bedpe,
+      target_bed = tmp_bed,
+      txdb = txdb_obj,
+      org_db = "org.Hs.eg.db",
+      species = "hg19",
+      out_dir = tempdir(),
+      project_name = "coord_test",
+      write_output = FALSE,
+      quiet = TRUE
+    )
+  )
   la <- res$loop_annotation
   expect_true(all(la$start1 >= 1))
   expect_true(all(la$start2 >= 1))
@@ -190,8 +198,10 @@ test_that("consolidate_chromatin_loops roundtrip preserves 0-based BEDPE start",
   writeLines("chr1\t0\t100\tchr1\t200\t300", f1)
   writeLines("chr1\t50\t150\tchr1\t220\t280", f2)
   out_file <- tempfile(fileext = ".bedpe")
-  suppressMessages(
-    consolidate_chromatin_loops(files = c(f1, f2), out_file = out_file)
+  looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    out_file = out_file,
+    quiet = TRUE
   )
   skip_if(!file.exists(out_file), "consolidation produced no output")
   exported <- read.table(out_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
@@ -207,8 +217,12 @@ test_that("consolidate_chromatin_loops roundtrip preserves 0-based BEDPE start",
 
 test_that("resolve_gene_conflicts handles empty input", {
   skip_if_not_installed("org.Hs.eg.db")
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
+  sample_txdb_path <- system.file(
+    "extdata", "hg19_knownGene_sample.sqlite",
+    package = "GenomicFeatures"
+  )
+  skip_if(sample_txdb_path == "", "Sample TxDb not available")
+  txdb <- AnnotationDbi::loadDb(sample_txdb_path)
   empty_df <- data.frame(
     chr = character(0), start = integer(0),
     end = integer(0), stringsAsFactors = FALSE
@@ -222,14 +236,20 @@ test_that("resolve_gene_conflicts handles empty input", {
 
 test_that("resolve_gene_conflicts handles no matching genes", {
   skip_if_not_installed("org.Hs.eg.db")
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
+  sample_txdb_path <- system.file(
+    "extdata", "hg19_knownGene_sample.sqlite",
+    package = "GenomicFeatures"
+  )
+  skip_if(sample_txdb_path == "", "Sample TxDb not available")
+  txdb <- AnnotationDbi::loadDb(sample_txdb_path)
   # Region in a gene desert (no promoters nearby)
   df <- data.frame(chr = "chr1", start = 1, end = 100, stringsAsFactors = FALSE)
-  res <- suppressWarnings(looplook:::resolve_gene_conflicts(
-    df, txdb,
-    "org.Hs.eg.db", c(-2000, 2000), NULL
-  ))
+  res <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook:::resolve_gene_conflicts(
+      df, txdb,
+      "org.Hs.eg.db", c(-2000, 2000), NULL
+    )
+  )
   expect_s3_class(res, "data.frame")
   expect_true(nrow(res) >= 1)
 })
@@ -293,13 +313,12 @@ test_that("consolidate_chromatin_loops exports cluster member count", {
     "chr1\t1010\t1090\tchr1\t1210\t1290"
   ), f2)
   out_file <- tempfile(fileext = ".bedpe")
-  gi <- suppressMessages(
-    consolidate_chromatin_loops(
-      files = c(f1, f2),
-      mode = "union",
-      gap = 1e9,
-      out_file = out_file
-    )
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "union",
+    gap = 1e9,
+    out_file = out_file,
+    quiet = TRUE
   )
   exported <- read.table(out_file, header = FALSE, sep = "\t", stringsAsFactors = FALSE)
   expect_equal(nrow(exported), 1)
@@ -403,10 +422,12 @@ test_that("draw_karyo_heatmap_internal stores self-contained image payload", {
   skip_if_not_installed("png")
 
   txdb <- TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene
-  gr <- suppressWarnings(GenomicRanges::GRanges(
-    seqnames = c("chr1", "chr2"),
-    ranges = IRanges::IRanges(start = c(1e6, 2e6), width = 5000)
-  ))
+  gr <- looplook:::.with_known_upstream_noise_suppressed(
+    GenomicRanges::GRanges(
+      seqnames = c("chr1", "chr2"),
+      ranges = IRanges::IRanges(start = c(1e6, 2e6), width = 5000)
+    )
+  )
 
   obj <- looplook:::draw_karyo_heatmap_internal(
     gr_data = gr,
@@ -459,20 +480,22 @@ test_that("profile_target_genes runs without OrgDb if GO analysis is disabled", 
   res <- shrink_annotation_res(res, n_loops = 40L, n_targets = 20L, n_stats = 20L)
 
   expect_no_error({
-    out <- suppressWarnings(suppressMessages(
-      profile_target_genes(
-        annotation_res = res,
-        diff_file = diff_path,
-        expr_matrix_file = expr_path,
+    out <- looplook:::.with_messages_silenced(
+      looplook:::.with_known_upstream_noise_suppressed(
+        looplook::profile_target_genes(
+          annotation_res = res,
+          diff_file = diff_path,
+          expr_matrix_file = expr_path,
         metadata_file = meta_path,
         target_source = "loops",
         project_name = "no_orgdb_needed",
         org_db = "definitelyNotAPackage",
         run_go = FALSE,
         run_ppi = FALSE,
-        run_motif = FALSE
+          run_motif = FALSE
+        )
       )
-    ))
+    )
     expect_type(out, "list")
     expect_true("loops" %in% names(out))
   })

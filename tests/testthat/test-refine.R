@@ -11,7 +11,7 @@ test_that("Module 3: refine_loop_anchors_by_expression runs successfully", {
   out_base <- tempdir()
 
 
-  res_basic <- suppressWarnings(suppressMessages(
+  res_basic <- looplook:::.with_known_upstream_noise_suppressed(
     refine_loop_anchors_by_expression(
       annotation_res = res_integrated,
       expr_matrix_file = expr_path,
@@ -20,15 +20,17 @@ test_that("Module 3: refine_loop_anchors_by_expression runs successfully", {
       unit_type = "TPM",
       reclassify_by_expression = FALSE,
       out_dir = out_base,
-      project_name = "Test_Basic_Filter"
+      project_name = "Test_Basic_Filter",
+      write_output = FALSE,
+      quiet = TRUE
     )
-  ))
+  )
   expect_type(res_basic, "list")
   expect_true(all(c("plots", "plot_list") %in% names(res_basic)))
   expect_identical(res_basic$plots, res_basic$plot_list)
 
 
-  res_reclass <- suppressWarnings(suppressMessages(
+  res_reclass <- looplook:::.with_known_upstream_noise_suppressed(
     refine_loop_anchors_by_expression(
       annotation_res = res_integrated,
       expr_matrix_file = expr_path,
@@ -37,9 +39,11 @@ test_that("Module 3: refine_loop_anchors_by_expression runs successfully", {
       unit_type = "TPM",
       reclassify_by_expression = TRUE,
       out_dir = out_base,
-      project_name = "Test_Reclass_Filter"
+      project_name = "Test_Reclass_Filter",
+      write_output = FALSE,
+      quiet = TRUE
     )
-  ))
+  )
   expect_type(res_reclass, "list")
   expect_true(all(c("plots", "plot_list") %in% names(res_reclass)))
   expect_identical(res_reclass$plots, res_reclass$plot_list)
@@ -58,7 +62,7 @@ test_that("refine_loop_anchors_by_expression respects quiet and write_output fla
   expect_false(dir.exists(out_base))
 
   expect_no_message({
-    res_basic <- suppressWarnings(
+    res_basic <- looplook:::.with_known_upstream_noise_suppressed(
       refine_loop_anchors_by_expression(
         annotation_res = res_integrated,
         expr_matrix_file = expr_path,

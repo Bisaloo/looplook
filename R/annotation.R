@@ -59,23 +59,27 @@
 #'
 #' @examples
 #' # Minimal runnable example for package checks
-#' if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
-#'   requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+#' if (requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+#'   txdb_example <- AnnotationDbi::loadDb(
+#'     system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
+#'   )
 #'   bedpe_path <- tempfile(fileext = ".bedpe")
 #'   writeLines(
-#'     "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+#'     "chr6\t10412000\t10412600\tchr6\t10415000\t10415600",
 #'     bedpe_path
 #'   )
 #'
 #'   res <- annotate_peaks_and_loops(
 #'     bedpe_file = bedpe_path,
-#'     species = "hg38",
+#'     txdb = txdb_example,
+#'     org_db = "org.Hs.eg.db",
+#'     species = "hg19",
 #'     out_dir = tempdir(),
 #'     project_name = "Quick_Example",
 #'     write_output = FALSE,
 #'     quiet = TRUE
 #'   )
-#'   head(res$loop_annotation)
+#'   head(res$loop_annotation, 1)
 #' }
 annotate_peaks_and_loops <- function(
   bedpe_file,
@@ -775,10 +779,10 @@ build_annotation_plots <- function(
 #' load(rdata_path, envir = temp_env)
 #' # Extract the first object found in the RData file
 #' raw_annotation <- temp_env[[ls(temp_env)[1]]]
-#' raw_annotation$loop_annotation <- head(raw_annotation$loop_annotation, 12)
-#' raw_annotation$target_annotation <- head(raw_annotation$target_annotation, 6)
-#' raw_annotation$promoter_centric_stats <- head(raw_annotation$promoter_centric_stats, 12)
-#' raw_annotation$distal_element_stats <- head(raw_annotation$distal_element_stats, 12)
+#' raw_annotation$loop_annotation <- head(raw_annotation$loop_annotation, 6)
+#' raw_annotation$target_annotation <- head(raw_annotation$target_annotation, 3)
+#' raw_annotation$promoter_centric_stats <- head(raw_annotation$promoter_centric_stats, 6)
+#' raw_annotation$distal_element_stats <- head(raw_annotation$distal_element_stats, 6)
 #'
 #' # =========================================================================
 #' # Example : Advanced filtering WITH Transcriptome-Guided Reclassification
@@ -786,7 +790,7 @@ build_annotation_plots <- function(
 #' res_reclassified <- refine_loop_anchors_by_expression(
 #'   annotation_res = raw_annotation,
 #'   expr_matrix_file = expr_path,
-#'   sample_columns = c("con1", "con2"),
+#'   sample_columns = "con1",
 #'   threshold = 1.0,
 #'   unit_type = "TPM",
 #'   species = "hg38",

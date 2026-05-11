@@ -6,7 +6,7 @@ test_that("data_processing modules run successfully on example bedpe files", {
   h3k27ac_peaks <- system.file("extdata", "example_k27ac_peaks.bed", package = "looplook")
   skip_if(loop1 == "" || loop2 == "")
 
-  res_clean <- suppressWarnings(suppressMessages(
+  res_clean <- looplook:::.with_known_upstream_noise_suppressed(
     consolidate_chromatin_loops(
       files = c(loop1, loop2),
       mode = "consensus",
@@ -15,9 +15,11 @@ test_that("data_processing modules run successfully on example bedpe files", {
       gap = 1000,
       blacklist_species = "hg38",
       region_of_interest = h3k27ac_peaks,
-      out_file = tempfile(fileext = ".bedpe")
+      out_file = tempfile(fileext = ".bedpe"),
+      write_output = FALSE,
+      quiet = TRUE
     )
-  ))
+  )
 
   expect_true(!is.null(res_clean))
 })
@@ -36,30 +38,33 @@ test_that("consolidate_chromatin_loops balances clustered scores across replicat
     "chr1\t15\t115\tchr1\t215\t315\t30"
   ), f2)
 
-  gi <- suppressMessages(consolidate_chromatin_loops(
+  gi <- consolidate_chromatin_loops(
     files = c(f1, f2),
     mode = "consensus",
-    gap = 25
-  ))
+    gap = 25,
+    quiet = TRUE
+  )
   expect_equal(length(gi), 1)
   expect_equal(S4Vectors::mcols(gi)$n_members[[1]], 4L)
   expect_equal(S4Vectors::mcols(gi)$n_reps[[1]], 2L)
   expect_equal(S4Vectors::mcols(gi)$score[[1]], 62.5)
 
-  gi_keep <- suppressMessages(consolidate_chromatin_loops(
+  gi_keep <- consolidate_chromatin_loops(
     files = c(f1, f2),
     mode = "consensus",
     gap = 25,
-    min_score = 50
-  ))
+    min_score = 50,
+    quiet = TRUE
+  )
   expect_equal(length(gi_keep), 1)
 
-  gi_drop <- suppressMessages(consolidate_chromatin_loops(
+  gi_drop <- consolidate_chromatin_loops(
     files = c(f1, f2),
     mode = "consensus",
     gap = 25,
-    min_score = 63
-  ))
+    min_score = 63,
+    quiet = TRUE
+  )
   expect_equal(length(gi_drop), 0)
 
   unlink(c(f1, f2))

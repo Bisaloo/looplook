@@ -11,6 +11,9 @@ plot_peaks_interactions(
   from = NULL,
   to = NULL,
   species = "hg38",
+  txdb = NULL,
+  org_db = NULL,
+  show_gene_track = TRUE,
   max_levels = 10,
   base_anchor_height = 0.05,
   loop_color = "#5D6D7E",
@@ -38,6 +41,17 @@ the most frequent chromosome in the BEDPE.}
 \item{to}{Numeric. End coordinate of the region to plot.}
 
 \item{species}{Character. Genome assembly: "hg38", "hg19", "mm10", or "mm9".}
+
+\item{txdb}{Optional \code{TxDb} object or installed package name. When
+\code{NULL}, looplook resolves a species-matched transcript annotation.}
+
+\item{org_db}{Optional \code{OrgDb}/\code{AnnotationDb} object or installed
+package name used for gene-symbol mapping. When \code{NULL}, looplook
+attempts species-matched mapping and otherwise falls back to \code{gene_id}.}
+
+\item{show_gene_track}{Logical. If \code{TRUE} (default), render the gene
+track using the resolved \code{txdb}. Set to \code{FALSE} for a lightweight
+loops-only view that skips transcript annotation.}
 
 \item{max_levels}{Integer. Maximum number of visible vertical levels for loop
 arc stacking (default: 10). Overlapping loops are separated into stacked
@@ -78,20 +92,17 @@ and annotated genes. Loop arcs can be colored or sized by interaction score
 (7th column in BEDPE).
 }
 \examples{
-if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
-  requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
-  bedpe_path <- tempfile(fileext = ".bedpe")
-  writeLines(
-    "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
-    bedpe_path
-  )
-  p <- plot_peaks_interactions(
-    bedpe_file = bedpe_path,
-    chr = "chr1",
-    from = 11884299,
-    to = 12106581,
-    species = "hg38"
-  )
-  print(p)
-}
+bedpe_path <- tempfile(fileext = ".bedpe")
+writeLines(
+  "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+  bedpe_path
+)
+p <- plot_peaks_interactions(
+  bedpe_file = bedpe_path,
+  chr = "chr1",
+  from = 11884299,
+  to = 12106581,
+  show_gene_track = FALSE
+)
+print(p)
 }
