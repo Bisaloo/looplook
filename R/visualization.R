@@ -360,8 +360,9 @@ prepare_track_data <- function(
 #' @param min_score Optional numeric. Floor value for score mapping.
 #' @param save_file Character. Optional path to save the plot via
 #'   \code{ggplot2::ggsave()}. When set, the plot is written to this file and
-#'   returned invisibly.
-#' @return A \code{ggplot} object (invisibly when \code{save_file} is non-NULL).
+#'   the same \code{ggplot} object is still returned.
+#' @return A \code{ggplot} object. If \code{save_file} is provided, the plot is
+#'   also written to disk via \code{ggplot2::ggsave()}.
 #' @importFrom dplyr %>%
 #' @importFrom ggplot2 ggplot geom_rect geom_segment annotate coord_cartesian
 #'   scale_x_continuous theme_classic labs ggsave arrow unit theme element_blank

@@ -45,10 +45,14 @@ if (getRversion() >= "2.15.1") {
     "tgt_genes_pg", "tgt_genes_prio", "topo_genes_p", "topo_genes_pg", "tpm",
     "tx_id", "type", "type_code", "type_rank", "valid_genes", "valid_tpms",
     "var", "width", "wilcox.test", "write.csv", "y_mid", "ymax", "ymin", "ypos", ":=",
-    "Loop_Connection", "Neighbor_Gene", "Neighbor_Type", "s1", "s2", "x", "y"
+    "Loop_Connection", "Neighbor_Gene", "Neighbor_Type", "s1", "s2", "x", "y",
+    "Conn_Group_jitter", "Conn_Group_num", "Conn_Group_slab",
+    "left_mid", "right_mid"
   ))
 }
 
+# Only suppress specific non-actionable upstream noise from third-party packages.
+# User/data validation warnings must remain visible to avoid masking real issues.
 .with_known_upstream_noise_suppressed <- function(expr) {
   withCallingHandlers(
     expr,
@@ -78,6 +82,7 @@ if (getRversion() >= "2.15.1") {
   )
 }
 
+# Quiet mode should only silence informational messages; warnings still surface.
 .with_messages_silenced <- function(expr) {
   withCallingHandlers(
     expr,

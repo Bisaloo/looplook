@@ -65,10 +65,11 @@ transparency.}
 
 \item{save_file}{Character. Optional path to save the plot via
 \code{ggplot2::ggsave()}. When set, the plot is written to this file and
-returned invisibly.}
+the same \code{ggplot} object is still returned.}
 }
 \value{
-A \code{ggplot} object (invisibly when \code{save_file} is non-NULL).
+A \code{ggplot} object. If \code{save_file} is provided, the plot is
+also written to disk via \code{ggplot2::ggsave()}.
 }
 \description{
 Generates an integrative genomic track plot displaying chromatin loops as arcs,
