@@ -41,6 +41,23 @@ vignette: >
     background: #f8f9fa;
     font-weight: 600;
   }
+  .comparison-table-wrap {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 30px 0;
+    clear: both;
+  }
+  .comparison-table-wrap .horizontal-scroll {
+    max-width: 100%;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+  }
+  .comparison-table-wrap table {
+    width: max-content;
+    min-width: 100%;
+    margin-bottom: 0;
+  }
 </style>
 
 ```{r setup, include = FALSE}
@@ -82,7 +99,7 @@ Beyond its utility as an integrative tool for target gene annotation, **`looploo
 
 `looplook` bridges the gap between conventional 1D linear annotation strategies and specialized 3D chromatin interaction tools, providing a unified environment for target assignment, expression-aware refinement, consensus consolidation, and functional inference. Table \@ref(tab:comparison-table) highlights the core capabilities of `looplook` relative to existing tools in the ecosystem.
 
-<div style="margin: 30px auto; display: table; clear: both;">
+<div class="comparison-table-wrap">
 
 ```{r comparison-table, echo=FALSE, message=FALSE, warning=FALSE}
 library(dplyr)
@@ -141,6 +158,8 @@ if (!requireNamespace("kableExtra", quietly = TRUE)) {
     kableExtra::column_spec(1:7, extra_css = "border: 1px solid #DDDDDD; padding: 8px;")
 }
 ```
+
+</div>
 
 <small style="color: #666; display: block; margin-top: -10px; margin-bottom: 20px;">
 <em>Notes:</em> “1D” = linear proximity-based mapping; “3D” = mapping via spatial chromatin topology; “<span style='color: #2E8B57;'>&#10004;</span>” = native support; “<span style='color: #B0BEC5;'>&#10008;</span>” = not supported; “<span style='color: #FF8F00;'>Partial</span>” = partial support (FUMA relies on precompiled data rather than user-provided input).
