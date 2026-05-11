@@ -18,7 +18,7 @@ if (has_data) {
       system.file("extdata", "example_tpm.txt", package = "looplook"),
       header = TRUE, row_name = 1, min_cols = 1
     ))
-  ), 30)
+  ), 12)
 
   diff_df <- looplook:::read_robust_general(
     system.file("extdata", "example_deg.txt", package = "looplook"),

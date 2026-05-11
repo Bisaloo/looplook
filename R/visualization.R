@@ -536,7 +536,7 @@ plot_peaks_interactions <- function(
       axis.text.y = ggplot2::element_blank(),
       axis.ticks.y = ggplot2::element_blank(),
       axis.title.y = ggplot2::element_blank(),
-      panel.border = ggplot2::element_rect(color = "black", fill = NA, size = 1),
+      panel.border = ggplot2::element_rect(color = "black", fill = NA, linewidth = 1),
       plot.title = ggplot2::element_text(hjust = 0.5)
     ) +
     ggplot2::labs(

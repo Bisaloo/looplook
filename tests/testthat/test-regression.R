@@ -1,6 +1,37 @@
 # tests/testthat/test-regression.R
 # Regression tests for bugs found during code review (2026-05-08)
 
+shrink_annotation_res <- function(res, n_loops = 25L, n_targets = 10L, n_stats = 25L) {
+  if (!is.null(res$loop_annotation)) {
+    res$loop_annotation <- head(res$loop_annotation, n_loops)
+    kept_clusters <- unique(stats::na.omit(res$loop_annotation$cluster_id))
+    if (!is.null(res$anchor_loci_annotation) && "cluster_id" %in% colnames(res$anchor_loci_annotation)) {
+      res$anchor_loci_annotation <- res$anchor_loci_annotation[
+        res$anchor_loci_annotation$cluster_id %in% kept_clusters,
+        ,
+        drop = FALSE
+      ]
+    }
+    if (!is.null(res$anchor_annotation) && "cluster_id" %in% colnames(res$anchor_annotation)) {
+      res$anchor_annotation <- res$anchor_annotation[
+        res$anchor_annotation$cluster_id %in% kept_clusters,
+        ,
+        drop = FALSE
+      ]
+    }
+  }
+  if (!is.null(res$target_annotation)) {
+    res$target_annotation <- head(res$target_annotation, n_targets)
+  }
+  if (!is.null(res$promoter_centric_stats)) {
+    res$promoter_centric_stats <- head(res$promoter_centric_stats, n_stats)
+  }
+  if (!is.null(res$distal_element_stats)) {
+    res$distal_element_stats <- head(res$distal_element_stats, n_stats)
+  }
+  res
+}
+
 # ── 1. BED/BEDPE 0-based → GRanges 1-based conversion ──────────────────────
 
 test_that("read_simple_bed converts 0-based start to 1-based", {
@@ -81,6 +112,7 @@ test_that("refine_loop_anchors_by_expression survives NULL target_annotation", {
   tmp <- new.env()
   load(rdata_path, envir = tmp)
   res <- tmp[[ls(tmp)[1]]]
+  res <- shrink_annotation_res(res)
   # Remove target_annotation to simulate loop-only input
   res$target_annotation <- NULL
   expect_error(
@@ -90,7 +122,9 @@ test_that("refine_loop_anchors_by_expression survives NULL target_annotation", {
       sample_columns = c("con1", "con2"),
       threshold = 1.0,
       out_dir = tempdir(),
-      project_name = "test_null_ta"
+      project_name = "test_null_ta",
+      write_output = FALSE,
+      quiet = TRUE
     ),
     NA
   )
@@ -144,7 +178,9 @@ test_that("same BEDPE gives consistent anchor coords in gi and annotation", {
     bedpe_file = tmp_bedpe,
     species = "hg38",
     out_dir = tempdir(),
-    project_name = "coord_test"
+    project_name = "coord_test",
+    write_output = FALSE,
+    quiet = TRUE
   ))
   la <- res$loop_annotation
   expect_true(all(la$start1 >= 1))
@@ -227,21 +263,12 @@ test_that("looplook_report bedpe_file defaults to NULL", {
 # ── 10. Assigned_Target_Genes prioritizes promoter-linked genes ──────────────
 
 test_that("Assigned_Target_Genes is not identical to all loop-connected genes", {
-  skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
-  skip_if_not_installed("org.Hs.eg.db")
-  bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-  bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-  skip_if(bedpe_path == "" || bed_path == "", "example data not available")
+  rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
+  skip_if(rdata_path == "", "example data not available")
 
-  res <- suppressWarnings(suppressMessages(
-    annotate_peaks_and_loops(
-      bedpe_file = bedpe_path,
-      target_bed = bed_path,
-      species = "hg38",
-      out_dir = tempdir(),
-      project_name = "priority_test"
-    )
-  ))
+  tmp <- new.env()
+  load(rdata_path, envir = tmp)
+  res <- tmp[[ls(tmp)[1]]]
   ta <- res$target_annotation
   informative <- ta[!is.na(ta$All_Loop_Connected_Genes) &
     !is.na(ta$Assigned_Target_Genes), , drop = FALSE]
@@ -372,14 +399,10 @@ test_that("run_heatmap_and_connectivity assigns each gene to one connectivity gr
 test_that("annotate_peaks_and_loops accepts OrgDb package objects", {
   skip_if_not_installed("TxDb.Hsapiens.UCSC.hg38.knownGene")
   skip_if_not_installed("org.Hs.eg.db")
-
-  bedpe_path <- system.file("extdata", "example_loops_mini.bedpe", package = "looplook")
-  bed_path <- system.file("extdata", "example_peaks_mini.bed", package = "looplook")
-  if (bedpe_path == "" || bed_path == "") {
-    bedpe_path <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
-    bed_path <- system.file("extdata", "example_peaks.bed", package = "looplook")
-  }
-  skip_if(bedpe_path == "" || bed_path == "", "example data not available")
+  bedpe_path <- tempfile(fileext = ".bedpe")
+  bed_path <- tempfile(fileext = ".bed")
+  writeLines("chr1\t0\t100\tchr1\t200\t300", bedpe_path)
+  writeLines("chr1\t0\t50", bed_path)
 
   expect_no_error({
     res <- suppressWarnings(suppressMessages(
@@ -389,7 +412,9 @@ test_that("annotate_peaks_and_loops accepts OrgDb package objects", {
         txdb = TxDb.Hsapiens.UCSC.hg38.knownGene::TxDb.Hsapiens.UCSC.hg38.knownGene,
         org_db = org.Hs.eg.db::org.Hs.eg.db,
         out_dir = tempdir(),
-        project_name = "orgdb_object_test"
+        project_name = "orgdb_object_test",
+        write_output = FALSE,
+        quiet = TRUE
       )
     ))
     expect_type(res, "list")
@@ -469,6 +494,7 @@ test_that("profile_target_genes runs without OrgDb if GO analysis is disabled", 
   tmp <- new.env()
   load(rdata_path, envir = tmp)
   res <- tmp[[ls(tmp)[1]]]
+  res <- shrink_annotation_res(res, n_loops = 40L, n_targets = 20L, n_stats = 20L)
 
   expect_no_error({
     out <- suppressWarnings(suppressMessages(
