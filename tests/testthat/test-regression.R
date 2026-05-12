@@ -401,6 +401,8 @@ test_that("run_heatmap_and_connectivity assigns each gene to one connectivity gr
   )
   expect_true("Raincloud_LFC" %in% names(res))
   expect_false(any(duplicated(res$Raincloud_LFC$data$Gene)))
+  expect_match(res$Raincloud_LFC$labels$subtitle, "Wilcox P", fixed = TRUE)
+  expect_match(res$Raincloud_Expr$labels$subtitle, "Wilcox P", fixed = TRUE)
 })
 
 

@@ -58,8 +58,7 @@ Imports:
     karyoploteR,
     ChIPseeker,
     methods,
-    scales,
-    rlang
+    scales
 Suggests: 
     BiocStyle,
     ComplexHeatmap,

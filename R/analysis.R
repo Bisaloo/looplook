@@ -852,19 +852,70 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 
   if (nlevels(plot_df_rc$Conn_Group) > 1) {
     clean_theme <- ggplot2::theme_classic() + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14), plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 11, color = "black"), legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1, size = 10, color = "black"), axis.text.y = ggplot2::element_text(size = 10, color = "black"), axis.title.y = ggplot2::element_text(size = 12, face = "bold"), axis.line = ggplot2::element_line(color = "black", linewidth = 0.6), axis.ticks = ggplot2::element_line(color = "black"), panel.grid = ggplot2::element_blank())
+    get_pval_str <- function(val_col) {
+      lvls <- levels(plot_df_rc$Conn_Group)
+      if (!"Others" %in% lvls) {
+        return("Wilcox P: NA (No 'Others' group)")
+      }
+
+      res <- character()
+      if ("High Distal" %in% lvls) {
+        p <- tryCatch(
+          stats::wilcox.test(
+            plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Distal"],
+            plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"]
+          )$p.value,
+          error = function(e) NA_real_
+        )
+        if (!is.na(p)) {
+          s <- dplyr::case_when(
+            p < 0.001 ~ "***",
+            p < 0.01 ~ "**",
+            p < 0.05 ~ "*",
+            TRUE ~ "ns"
+          )
+          res <- c(res, paste0("Distal=", signif(p, 3), " (", s, ")"))
+        }
+      }
+
+      if ("High Total" %in% lvls) {
+        p <- tryCatch(
+          stats::wilcox.test(
+            plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Total"],
+            plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"]
+          )$p.value,
+          error = function(e) NA_real_
+        )
+        if (!is.na(p)) {
+          s <- dplyr::case_when(
+            p < 0.001 ~ "***",
+            p < 0.01 ~ "**",
+            p < 0.05 ~ "*",
+            TRUE ~ "ns"
+          )
+          res <- c(res, paste0("Total=", signif(p, 3), " (", s, ")"))
+        }
+      }
+
+      if (length(res) == 0) {
+        return("Wilcox P: NA")
+      }
+      paste0("Wilcox P (vs Others):\n", paste(res, collapse = " | "))
+    }
+
     base_box <- function(y_var, y_lab) {
       ggplot2::ggplot(plot_df_rc, ggplot2::aes(fill = Conn_Group)) +
-        ggplot2::geom_jitter(ggplot2::aes(x = .data$Conn_Group_jitter, y = rlang::.data[[y_var]], color = .data$Conn_Group), shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
-        ggplot2::stat_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]], color = .data$Conn_Group), geom = "errorbar", width = 0.05, linewidth = 0.5) +
-        ggplot2::geom_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]], color = .data$Conn_Group), width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
-        ggplot2::stat_summary(ggplot2::aes(x = .data$Conn_Group_num, y = rlang::.data[[y_var]]), fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
-        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = rlang::.data[[y_var]], fill = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
-        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = rlang::.data[[y_var]], color = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
+        ggplot2::geom_jitter(ggplot2::aes(x = .data$Conn_Group_jitter, y = .data[[y_var]], color = .data$Conn_Group), shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
+        ggplot2::stat_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]], color = .data$Conn_Group), geom = "errorbar", width = 0.05, linewidth = 0.5) +
+        ggplot2::geom_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]], color = .data$Conn_Group), width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
+        ggplot2::stat_summary(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]]), fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
+        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = .data[[y_var]], fill = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
+        ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = .data[[y_var]], color = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
         ggplot2::scale_x_continuous(breaks = seq_along(levels(plot_df_rc$Conn_Group)), labels = levels(plot_df_rc$Conn_Group)) +
         ggplot2::coord_cartesian(xlim = c(0.75, length(levels(plot_df_rc$Conn_Group)) + 0.6)) +
         ggplot2::scale_fill_manual(values = custom_colors) +
         ggplot2::scale_color_manual(values = custom_colors) +
-        ggplot2::labs(title = "Regulation: High_connectivity vs Others", x = NULL, y = y_lab) +
+        ggplot2::labs(title = "Regulation: High_connectivity vs Others", subtitle = get_pval_str(y_var), x = NULL, y = y_lab) +
         clean_theme
     }
     plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") + ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey45", linewidth = 0.6)
