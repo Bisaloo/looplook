@@ -860,7 +860,6 @@ refine_loop_anchors_by_expression <- function(
   whitelist <- names(vals)[vals > threshold & !is.na(vals) & names(vals) != ""]
   log_message(sprintf("    >>> Active Genes (> %s %s): %d", threshold, unit_type, length(whitelist)))
 
-  # Warn if whitelist has suspiciously low overlap with annotation genes
   anno_genes <- unique(c(
     trimws(unlist(strsplit(na.omit(loop_df$anchor1_gene), ";"))),
     trimws(unlist(strsplit(na.omit(loop_df$anchor2_gene), ";")))

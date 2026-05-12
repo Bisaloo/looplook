@@ -325,9 +325,6 @@ consolidate_chromatin_loops <- function(
 
   result_gi <- NULL
 
-  # ==========================================
-  # PATH A: STRICT INTERSECT (No Clustering)
-  # ==========================================
   if (mode == "intersect") {
     log_message(">>> Intersect mode: Reference-based filtering (No Coordinate Merging)")
     log_message("    Base: File 1. Criterion: Must overlap with ALL other files.")
@@ -353,11 +350,8 @@ consolidate_chromatin_loops <- function(
     S4Vectors::mcols(result_gi)$n_reps <- n_reps
     S4Vectors::mcols(result_gi)$n_members <- n_reps
 
-    # ==========================================
-    # PATH B: CLUSTERING (Consensus / Union)
-    # ==========================================
   } else {
-    #
+
     log_message(">>> Clustering mode (Union/Consensus): Merging coordinates via Graph")
 
     combined_dt <- data.table::rbindlist(lapply(gi_list, gi_to_dt))
@@ -382,9 +376,6 @@ consolidate_chromatin_loops <- function(
     result_gi <- dt_to_gi(reduced_dt)
   }
 
-  # ==========================================
-  # POST-PROCESSING (Filters & Output)
-  # ==========================================
 
   if (!is.null(min_score)) {
     keep <- S4Vectors::mcols(result_gi)$score >= min_score
