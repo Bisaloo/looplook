@@ -852,7 +852,7 @@ test_that("refine: full target-assignment fallback chain", {
 # ════════════════════════════════════════════════════════════════════════════
 
 test_that(".calc_gc_fraction computes GC content correctly", {
-  seqs <- Biostrings::DNAStringSet(c("GCGC", "ATAT", "NNNN", "GCAT", ""))
+  seqs <- c("GCGC", "ATAT", "NNNN", "GCAT", "")
   gc <- looplook:::.calc_gc_fraction(seqs)
   expect_equal(gc[1], 1.0)
   expect_equal(gc[2], 0.0)
