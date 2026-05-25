@@ -132,7 +132,6 @@ test_that("compute_refined_stats splits semicolon-separated genes", {
   res <- looplook:::compute_refined_stats(
     loop_df = loop_df,
     upstream_promoter_stats = NULL,
-    upstream_distal_stats = NULL,
     vals = vals,
     threshold = 1,
     hub_percentile = 0.95
@@ -343,7 +342,6 @@ test_that("compute_refined_stats keeps G anchors in distal stats", {
   res <- looplook:::compute_refined_stats(
     loop_df = loop_df,
     upstream_promoter_stats = NULL,
-    upstream_distal_stats = NULL,
     vals = vals,
     threshold = 1,
     hub_percentile = 0.95

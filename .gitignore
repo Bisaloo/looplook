@@ -16,3 +16,5 @@ tests/testthat/Rplots.pdf
 .Rproj.user/
 Meta/
 pkgdown/
+tests/testthat/_problems/
+tests/testthat/testthat-problems.rds

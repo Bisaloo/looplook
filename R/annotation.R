@@ -15,7 +15,7 @@
 #' To address complex loci where a single anchor overlaps multiple promoters (e.g., dense gene clusters or bidirectional promoters), the function executes a 3-step resolution:
 #' \enumerate{
 #'   \item \emph{Expression Filter:} Excludes transcriptionally silent genes using a user-provided expression matrix.
-#'   \item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > Antisense > lncRNA > Pseudogene}.
+#'   \item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
 #'   \item \emph{Expression Tiebreaker:} Resolves remaining ambiguities by designating the gene with the highest transcriptional abundance as the primary target.
 #' }
 #'
@@ -298,8 +298,8 @@ annotate_peaks_and_loops <- function(
 
   log_message("Step 4: Constructing Loop Tables...")
   loops_annotated <- loops_annotated %>%
-    dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg1 = topo_genes_pg, p1 = topo_genes_p), by = c("a1_id" = "anchor_id")) %>%
-    dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg2 = topo_genes_pg, p2 = topo_genes_p), by = c("a2_id" = "anchor_id")) %>%
+    dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg1 = topo_genes_pg), by = c("a1_id" = "anchor_id")) %>%
+    dplyr::left_join(anchor_topo_map %>% dplyr::select(anchor_id, pg2 = topo_genes_pg), by = c("a2_id" = "anchor_id")) %>%
     dplyr::rowwise() %>%
     dplyr::mutate(proximate_loop_gene = dplyr::case_when((!is.na(t1) & t1 == "G" & !is.na(t2) & t2 == "P") ~ extract_genes(pg2), (!is.na(t1) & t1 == "P" & !is.na(t2) & t2 == "G") ~ extract_genes(pg1), TRUE ~ extract_genes(c(pg1, pg2)))) %>%
     dplyr::ungroup()
@@ -383,7 +383,7 @@ annotate_peaks_and_loops <- function(
       dplyr::left_join(anchor_coords_map, by = c("Distal_Anchor_ID" = "anchor_id")) %>%
       dplyr::mutate(Is_High_Connectivity_Distal_Element = dplyr::if_else(Total_Loops >= final_cutoff_dist, "Yes", "No")) %>%
       dplyr::select(chr, start, end, cluster_id, Total_Loops, n_Linked_Promoters, n_Linked_Distal, Dominant_Interaction, Is_High_Connectivity_Distal_Element, Target_Genes) %>%
-      dplyr::arrange(dplyr::desc(n_Linked_Promoters))
+      dplyr::arrange(dplyr::desc(Total_Loops))
   } else {
     distal_element_df <- NULL
   }
@@ -842,7 +842,7 @@ refine_loop_anchors_by_expression <- function(
 
   # Check and reconstruct IDs if missing
   if (!"a1_id" %in% colnames(loop_df) || !"a2_id" %in% colnames(loop_df)) {
-    log_message("    [Info] 'a1_id'/'a2_id' columns missing. Reconstructing from coordinates...")
+    log_message("    Reconstructing anchor IDs from coordinates (omitted from upstream loop_annotation output).")
     loop_df <- loop_df %>%
       dplyr::mutate(
         a1_id = paste(chr1, start1, end1, sep = "_"),
@@ -851,7 +851,6 @@ refine_loop_anchors_by_expression <- function(
   }
 
   upstream_promoter_stats <- annotation_res$promoter_centric_stats
-  upstream_distal_stats <- annotation_res$distal_element_stats
 
   if (is.null(expr_matrix_file) || is.null(sample_columns)) {
     stop("Expression matrix file and sample columns are required for refinement.")
@@ -895,20 +894,42 @@ refine_loop_anchors_by_expression <- function(
   loop_df$anchor2_gene <- vapply(a2_res, function(x) x$gene, character(1))
   loop_df$loop_type <- mapply(function(t1, t2) paste(sort(c(t1, t2)), collapse = "-"), loop_df$anchor1_type, loop_df$anchor2_type)
 
+  # Preserve original ego-network-derived target genes, filter through whitelist.
+  # Fallback: when all original targets are silenced, derive from direct anchor genes.
+  filter_genes_wl <- function(x) {
+    if (is.na(x) || x == "") return(NA_character_)
+    gs <- trimws(unlist(strsplit(as.character(x), ";")))
+    gs <- unique(gs[gs %in% whitelist])
+    if (length(gs) == 0) return(NA_character_)
+    paste(sort(gs), collapse = ";")
+  }
+  original_ptg <- loop_df$Putative_Target_Genes
+  filtered_ptg <- vapply(original_ptg, filter_genes_wl, character(1))
+
   is_enh_like <- function(t) t %in% c("E", "eP", "eG")
   is_promoter <- function(t) t == "P"
+  is_gene_body <- function(t) t == "G"
 
   loop_df <- loop_df %>%
     dplyr::rowwise() %>%
     dplyr::mutate(
-      Putative_Target_Genes = dplyr::case_when(
+      .fallback_ptg = dplyr::case_when(
         (is_promoter(anchor1_type) & is_enh_like(anchor2_type)) ~ extract_genes(anchor1_gene),
         (is_enh_like(anchor1_type) & is_promoter(anchor2_type)) ~ extract_genes(anchor2_gene),
         (is_promoter(anchor1_type) & is_promoter(anchor2_type)) ~ extract_genes(c(anchor1_gene, anchor2_gene)),
+        (is_promoter(anchor1_type) & is_gene_body(anchor2_type)) ~ extract_genes(anchor1_gene),
+        (is_gene_body(anchor1_type) & is_promoter(anchor2_type)) ~ extract_genes(anchor2_gene),
+        (is_gene_body(anchor1_type) & is_enh_like(anchor2_type)) ~ extract_genes(anchor1_gene),
+        (is_enh_like(anchor1_type) & is_gene_body(anchor2_type)) ~ extract_genes(anchor2_gene),
         TRUE ~ extract_genes(c(anchor1_gene, anchor2_gene))
       )
     ) %>%
     dplyr::ungroup()
+
+  loop_df$Putative_Target_Genes <- filtered_ptg
+  empty_idx <- is.na(loop_df$Putative_Target_Genes) | loop_df$Putative_Target_Genes == ""
+  loop_df$Putative_Target_Genes[empty_idx] <- loop_df$.fallback_ptg[empty_idx]
+  loop_df <- loop_df %>% dplyr::select(-.fallback_ptg)
 
   # --- 3. Stats Update ---
   log_message(">>> [Step 3] Updating Stats...")
@@ -929,7 +950,6 @@ refine_loop_anchors_by_expression <- function(
   stats_res <- compute_refined_stats(
     loop_df = loop_df,
     upstream_promoter_stats = upstream_promoter_stats,
-    upstream_distal_stats = upstream_distal_stats,
     vals = vals,
     threshold = threshold,
     hub_percentile = hub_percentile
@@ -958,6 +978,54 @@ refine_loop_anchors_by_expression <- function(
           }
           return(paste(unique(sort(trimws(gs_active))), collapse = ";"))
         }, FUN.VALUE = character(1))
+      }
+    }
+
+    # Fallback: when P->eP/G->eG downgrade empties Assigned_Target_Genes,
+    # backfill from refined loop Putative_Target_Genes via Linked_Loop_IDs.
+    if ("Linked_Loop_IDs" %in% colnames(bed_info) &&
+        "loop_ID" %in% colnames(loop_df) &&
+        "Putative_Target_Genes" %in% colnames(loop_df)) {
+      loop_tgt <- loop_df %>%
+        dplyr::filter(!is.na(Putative_Target_Genes) & Putative_Target_Genes != "") %>%
+        dplyr::select(loop_ID, Putative_Target_Genes) %>%
+        dplyr::distinct()
+      get_loop_tgt <- function(linked) {
+        if (is.na(linked) || linked == "") return(NA_character_)
+        ids <- trimws(unlist(strsplit(as.character(linked), ";")))
+        tgt <- loop_tgt$Putative_Target_Genes[match(ids, loop_tgt$loop_ID)]
+        genes <- unique(trimws(unlist(strsplit(na.omit(tgt), ";"))))
+        genes <- genes[genes != ""]
+        if (length(genes) == 0) return(NA_character_)
+        paste(sort(genes), collapse = ";")
+      }
+      loop_tgt_vec <- vapply(bed_info$Linked_Loop_IDs, get_loop_tgt,
+                             FUN.VALUE = character(1))
+      if ("Assigned_Target_Genes" %in% colnames(bed_info)) {
+        empty <- is.na(bed_info$Assigned_Target_Genes) | bed_info$Assigned_Target_Genes == ""
+        fill_ok <- !is.na(loop_tgt_vec) & loop_tgt_vec != ""
+        bed_info$Assigned_Target_Genes[empty & fill_ok] <- loop_tgt_vec[empty & fill_ok]
+        if ("Assigned_Target_Genes_Filled" %in% colnames(bed_info)) {
+          has_tgt <- !is.na(bed_info$Assigned_Target_Genes) & bed_info$Assigned_Target_Genes != ""
+          any_sym_in_wl <- function(s) {
+            if (is.na(s) || s == "") return(FALSE)
+            any(trimws(unlist(strsplit(as.character(s), ";"))) %in% whitelist)
+          }
+          filter_sym_expressed <- function(s) {
+            if (is.na(s) || s == "") return(NA_character_)
+            gs <- trimws(unlist(strsplit(as.character(s), ";")))
+            gs <- gs[gs %in% whitelist]
+            if (length(gs) == 0) return(NA_character_)
+            paste(sort(gs), collapse = ";")
+          }
+          has_sym <- vapply(bed_info$SYMBOL, any_sym_in_wl, logical(1))
+          sym_fill <- vapply(bed_info$SYMBOL, filter_sym_expressed, character(1))
+          bed_info$Assigned_Target_Genes_Filled <- dplyr::case_when(
+            has_tgt ~ bed_info$Assigned_Target_Genes,
+            has_sym ~ sym_fill,
+            TRUE ~ NA_character_
+          )
+        }
       }
     }
   }

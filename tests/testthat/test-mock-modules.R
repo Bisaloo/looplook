@@ -55,7 +55,7 @@ test_that("compute_refined_stats handles NULL upstream stats", {
   names(vals)[1] <- "G1"
 
   res <- looplook:::compute_refined_stats(mock_loop,
-    upstream_promoter_stats = NULL, upstream_distal_stats = NULL,
+    upstream_promoter_stats = NULL,
     vals = vals, threshold = 1, hub_percentile = 0.95
   )
 
@@ -89,7 +89,7 @@ test_that("compute_refined_stats handles upstream stats merge", {
 
   vals <- c(TP53 = 8, BRCA1 = 3, MYC = 5, EGFR = 2)
   res <- looplook:::compute_refined_stats(mock_loop,
-    upstream_promoter_stats = upstream_prom, upstream_distal_stats = NULL,
+    upstream_promoter_stats = upstream_prom,
     vals = vals, threshold = 1, hub_percentile = 0.95
   )
 

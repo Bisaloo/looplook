@@ -80,7 +80,11 @@ bedpe_to_gi <- function(bedpe_file) {
     v7 <- as.numeric(df[, 7])
     if (sum(!is.na(v7)) > (nrow(df) * 0.5)) {
       final_scores <- v7
+      found <- TRUE
     }
+  }
+  if (!found && ncol(df) >= 7) {
+    warning("Scores defaulted to 0: no column beyond 6 had >50% numeric values")
   }
 
   final_scores[is.na(final_scores)] <- 0

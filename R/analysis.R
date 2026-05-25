@@ -84,7 +84,7 @@ profile_target_genes <- function(
   genome_id = "hg38",
   motif_p_thresh = 1e-4,
   motif_ntop = 5,
-  run_go = TRUE,
+  run_go = FALSE,
   run_ppi = FALSE,
   ppi_score = 400,
   ppi_nSample = 400,
@@ -107,8 +107,13 @@ profile_target_genes <- function(
 
   message(">>> Analysis Init | Root Project: ", root_project_name)
 
-  if (run_go && !requireNamespace(org_db, quietly = TRUE)) {
-    stop("Package ", org_db, " missing. Please install it.")
+  if (run_go) {
+    if (!requireNamespace("clusterProfiler", quietly = TRUE))
+      stop("Package 'clusterProfiler' is required for GO analysis. Please install it.")
+    if (!requireNamespace("enrichplot", quietly = TRUE))
+      stop("Package 'enrichplot' is required for GO analysis. Please install it.")
+    if (!requireNamespace(org_db, quietly = TRUE))
+      stop("Package '", org_db, "' is required for GO analysis. Please install it.")
   }
 
   if (run_motif) {
@@ -177,7 +182,11 @@ profile_target_genes <- function(
     for (task_name in names(analysis_queue)) {
       target_genes <- analysis_queue[[task_name]]
       current_proj_name <- paste0(current_source_proj_name, "_", task_name)
-      target_genes <- intersect(target_genes, names(global_glist))
+      # Case-insensitive intersection: remap target genes to the case used in the
+      # differential-expression ranked list, silently dropping genes not in the list.
+      idx <- match(toupper(target_genes), toupper(names(global_glist)))
+      target_genes <- unique(names(global_glist)[idx[!is.na(idx)]])
+      analysis_queue[[task_name]] <- target_genes
 
       message("\n--- Task: ", task_name, " (Valid Genes: ", length(target_genes), ") ---")
       if (length(target_genes) < 3) {
@@ -300,7 +309,7 @@ read_robust_general <- function(f, header = FALSE, row_name = NULL, desc = "file
   if (!file.exists(f)) stop(desc, " not found: ", f)
 
   # 彻底听取审稿人建议，抛弃繁琐的 tryCatch 瞎猜，信任底层引擎
-  d_dt <- data.table::fread(f, header = header, data.table = FALSE, showProgress = FALSE)
+  d_dt <- data.table::fread(f, header = header, data.table = FALSE, showProgress = FALSE, fill = Inf)
 
   if (!is.null(row_name) && ncol(d_dt) > 1) {
     rownames(d_dt) <- d_dt[, row_name]
@@ -421,7 +430,16 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
   names(curr_glist) <- toupper(names(curr_glist))
   curr_targets <- toupper(target_genes)
 
-  if (!is.null(gsea_ntop) && length(curr_targets) > gsea_ntop) curr_targets <- sample(curr_targets, gsea_ntop)
+  if (!is.null(gsea_ntop) && length(curr_targets) > gsea_ntop) {
+    valid <- intersect(curr_targets, names(curr_glist))
+    if (length(valid) > gsea_ntop) {
+      weights <- abs(curr_glist[valid])
+      if (sum(weights) == 0) weights <- rep(1, length(valid))
+      curr_targets <- sample(valid, size = gsea_ntop, prob = weights)
+    } else {
+      curr_targets <- valid
+    }
+  }
   if (length(intersect(curr_targets, names(curr_glist))) < 2) {
     return(list(result = NULL, plot = NULL))
   }
@@ -576,7 +594,9 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
   ego_df$Description <- vapply(ego_df$Description, function(x) paste(strwrap(x, width = 35), collapse = "\n"), FUN.VALUE = character(1))
   slot(ego, "result") <- ego_df
 
+  old_ggrepel <- getOption("ggrepel.max.overlaps", 10)
   options(ggrepel.max.overlaps = 100)
+  on.exit(options(ggrepel.max.overlaps = old_ggrepel), add = TRUE)
   p_cnet <- .with_known_upstream_noise_suppressed(
     enrichplot::cnetplot(ego, foldChange = fc_vec, showCategory = top_n, node_label = "category")
   )
@@ -624,6 +644,9 @@ run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_
   }
 
   g_string <- string_db_obj$get_subnetwork(hits)
+  if (is.null(g_string) || igraph::vcount(g_string) == 0) {
+    return(NULL)
+  }
   g_string <- igraph::delete_vertices(g_string, igraph::V(g_string)[igraph::degree(g_string) == 0])
   if (igraph::vcount(g_string) == 0) {
     return(NULL)
@@ -1460,7 +1483,7 @@ looplook_report <- function(
   target_source = "targets",
   loop_types = c("E-P", "P-P"),
   stat_test = "wilcox.test",
-  run_go = TRUE,
+  run_go = FALSE,
   run_ppi = FALSE,
   run_motif = FALSE,
   genome_id = species,

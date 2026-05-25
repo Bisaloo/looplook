@@ -33,8 +33,9 @@ columns resolved.
 \description{
 For each genomic range in an annotation data frame, identifies all genes
 whose promoters overlap the range, then selects the best candidate using
-expression level and biotype priority (protein-coding > antisense > lncRNA >
-pseudo). When multiple genes have similar expression, all are retained
+expression level and biotype priority (protein-coding > small-ncRNA
+(miRNA, snoRNA, snRNA, rRNA, scaRNA) > antisense > lncRNA/ncRNA >
+pseudogene). When multiple genes have similar expression, all are retained
 (collapsed with ";").
 }
 \keyword{internal}

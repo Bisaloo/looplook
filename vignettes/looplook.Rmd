@@ -360,7 +360,7 @@ The function exports a comprehensive Excel workbook (`*_Basic_Results.xlsx`) con
 * **`All_Loop_Connected_Genes`**: All genes (including promoters and gene bodies) topologically linked to the peak via 3D looping.
 * **`Regulated_promoter_genes`**: A stringent subset restricted to genes whose promoters are directly contacted by the peak via 3D looping. 
 * **`Assigned_Target_Genes`**: Target genes assigned *exclusively* via 3D loops. If the peak does not overlap any structural loop, this value remains empty (`NA`).
-* **`*_Filled` Columns (The "Smart Fallback" Logic)**: Columns suffixed with `_Filled` (e.g., `Assigned_Target_Genes_Filled`, `Regulated_promoter_genes_Filled`) provide complete, gapless annotations. For peaks within looped regions, they retain 3D-refined distal targets; for peaks in unlooped regions, they will be annotated to the nearest linear gene.
+* **`*_Filled` Columns (The "Smart Fallback" Logic)**: Columns suffixed with `_Filled` (e.g., `Assigned_Target_Genes_Filled`, `Regulated_promoter_genes_Filled`) provide complete, gapless annotations. They resolve target genes via a two-tier priority: (1) 3D-loop-derived distal targets are used when an expressed gene is reachable through chromatin contacts; (2) when no expressed gene is found through 3D connections — either because the peak has no loop contacts or all contactable genes are transcriptionally silent — the nearest expressed linear gene (`SYMBOL`) serves as the final fallback.
 
 #### 2. `loop_annotation` (3D Network Architecture)
 

@@ -25,7 +25,7 @@ looplook_report(
   target_source = "targets",
   loop_types = c("E-P", "P-P"),
   stat_test = "wilcox.test",
-  run_go = TRUE,
+  run_go = FALSE,
   run_ppi = FALSE,
   run_motif = FALSE,
   genome_id = species,

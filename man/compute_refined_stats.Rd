@@ -7,7 +7,6 @@
 compute_refined_stats(
   loop_df,
   upstream_promoter_stats,
-  upstream_distal_stats,
   vals,
   threshold,
   hub_percentile
@@ -17,8 +16,6 @@ compute_refined_stats(
 \item{loop_df}{Loop annotation data frame after expression filtering.}
 
 \item{upstream_promoter_stats}{Upstream promoter-centric stats (or NULL).}
-
-\item{upstream_distal_stats}{Upstream distal-element stats (or NULL).}
 
 \item{vals}{Named numeric vector of per-gene mean expression.}
 

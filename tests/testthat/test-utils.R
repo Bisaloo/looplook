@@ -12,7 +12,10 @@ test_that("read_robust_general pushes all I/O boundary conditions", {
   expect_equal(ncol(res_csv), 3)
 
   tmp_dirty <- tempfile(fileext = ".txt")
-  writeLines(c("# This is a comment", "Gene\tExp1\tExp2", "BRD4\t10\t20", "MYC\tNA\t30"), tmp_dirty)
+  write.table(
+    data.frame(Gene = c("BRD4", "MYC"), Exp1 = c("10", "NA"), Exp2 = c(20, 30)),
+    tmp_dirty, sep = "\t", row.names = FALSE, quote = FALSE
+  )
   res_dirty <- looplook:::read_robust_general(tmp_dirty, header = TRUE, row_name = 1, min_cols = 2)
   expect_equal(nrow(res_dirty), 2)
 

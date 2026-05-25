@@ -85,7 +85,7 @@ The method prioritizes physical 3D chromatin contacts. If a genomic feature over
 To address complex loci where a single anchor overlaps multiple promoters (e.g., dense gene clusters or bidirectional promoters), the function executes a 3-step resolution:
 \enumerate{
 \item \emph{Expression Filter:} Excludes transcriptionally silent genes using a user-provided expression matrix.
-\item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > Antisense > lncRNA > Pseudogene}.
+\item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
 \item \emph{Expression Tiebreaker:} Resolves remaining ambiguities by designating the gene with the highest transcriptional abundance as the primary target.
 }
 
