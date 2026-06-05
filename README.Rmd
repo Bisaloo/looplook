@@ -265,5 +265,9 @@ If you use `looplook` in your research, please cite the preprint:
 For reproducibility, `looplook` is developed and tested under the following environment:
 
 ```{r session_info, eval = TRUE, echo = FALSE}
-sessionInfo()
+if (requireNamespace("devtools", quietly = TRUE)) {
+  devtools::session_info()
+} else {
+  sessionInfo()
+}
 ```

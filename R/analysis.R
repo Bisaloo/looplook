@@ -451,9 +451,12 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
   }
 
   p_out <- NULL
-  p_temp <- .with_known_upstream_noise_suppressed(
+  p_temp <- tryCatch(
+    .with_known_upstream_noise_suppressed(
       enrichplot::gseaplot2(gsea_res, geneSetID = 1, subplots = 1)
-    )
+    ),
+    error = function(e) NULL
+  )
     d <- NULL
     if (inherits(p_temp, "ggplot")) {
       d <- p_temp$data
@@ -861,14 +864,20 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 
   full_title_suffix <- paste0(if (source_type == "loops") "Looped (Specified Types)" else "Looped Targets", " | ", display_tag)
 
-  plots_list$Scatter <- ggplot2::ggplot(plot_df, ggplot2::aes(x = Log10Degree, y = Expression)) +
-    ggpointdensity::geom_pointdensity(alpha = 0.6, size = 1.5) +
-    viridis::scale_color_viridis(option = "D", name = "Density") +
-    ggplot2::geom_smooth(method = "lm", formula = y ~ x, color = "black", se = TRUE, linewidth = 0.8) +
-    ggpubr::stat_cor(method = cor_method, label.x.npc = "left", label.y.npc = "top", size = 4) +
-    ggplot2::theme_bw() +
-    ggplot2::theme(panel.grid = ggplot2::element_blank(), panel.background = ggplot2::element_rect(color = "black", fill = "transparent"), legend.key = ggplot2::element_rect(fill = "transparent"), plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
-    ggplot2::labs(title = "Connectivity vs Expression (Scatter)", subtitle = paste0(full_title_suffix, "\nGenes: ", nrow(plot_df)), x = paste0("Log10 (", display_tag, ")"), y = "Log2(Mean Expression + 1)")
+  plots_list$Scatter <- if (requireNamespace("ggpointdensity", quietly = TRUE) &&
+    requireNamespace("viridis", quietly = TRUE) &&
+    requireNamespace("ggpubr", quietly = TRUE)) {
+    ggplot2::ggplot(plot_df, ggplot2::aes(x = Log10Degree, y = Expression)) +
+      ggpointdensity::geom_pointdensity(alpha = 0.6, size = 1.5) +
+      viridis::scale_color_viridis(option = "D", name = "Density") +
+      ggplot2::geom_smooth(method = "lm", formula = y ~ x, color = "black", se = TRUE, linewidth = 0.8) +
+      ggpubr::stat_cor(method = cor_method, label.x.npc = "left", label.y.npc = "top", size = 4) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(panel.grid = ggplot2::element_blank(), panel.background = ggplot2::element_rect(color = "black", fill = "transparent"), legend.key = ggplot2::element_rect(fill = "transparent"), plot.title = ggplot2::element_text(hjust = 0.5, face = "bold")) +
+      ggplot2::labs(title = "Connectivity vs Expression (Scatter)", subtitle = paste0(full_title_suffix, "\nGenes: ", nrow(plot_df)), x = paste0("Log10 (", display_tag, ")"), y = "Log2(Mean Expression + 1)")
+  } else {
+    NULL
+  }
 
   if ("Is_High_Distal_Connectivity_Gene" %in% colnames(plot_df) && "Is_High_Connectivity_Gene" %in% colnames(plot_df)) {
     plot_df_rc <- plot_df %>%
