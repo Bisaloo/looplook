@@ -663,7 +663,7 @@ This section contains the most critical routing parameters that define the biolo
 
 Ideal for complete multi-omics integration (e.g., HiChIP + ATAC-seq). This mode comprehensively maps and profiles target genes of interest.
 
-```{r profiling_scenario_A, message=FALSE, warning=FALSE}
+```{r profiling_scenario_A, message=FALSE, warning=FALSE, eval=requireNamespace("ggpointdensity", quietly=TRUE) && requireNamespace("viridis", quietly=TRUE) && requireNamespace("ggpubr", quietly=TRUE) && requireNamespace("ggdist", quietly=TRUE)}
 diff_path <- system.file("extdata", "example_deg.txt", package = "looplook")
 meta_path <- system.file("extdata", "example_coldata.txt", package = "looplook")
 
@@ -690,7 +690,7 @@ This mode applies a rigorous dual-filtering strategy to yield a high-confidence 
 
 First, `target_source = "targets"` restricts profiling to genes regulated specifically by user-defined genomic features (e.g., GWAS SNPs or TF binding sites), excluding background spatial loops. Second, `target_mapping_mode = "promoter"` enforces topological stringency: loops linking peaks to target genes must directly contact canonical or reference promoters (i.e., strict `E-P` or `P-P` loops), excluding more permissive connections such as enhancer-gene body (`E-G`) interactions.
 
-```{r profiling_scenario_B, message=FALSE, warning=FALSE}
+```{r profiling_scenario_B, message=FALSE, warning=FALSE, eval=requireNamespace("ggpointdensity", quietly=TRUE) && requireNamespace("viridis", quietly=TRUE) && requireNamespace("ggpubr", quietly=TRUE) && requireNamespace("ggdist", quietly=TRUE)}
 res_B <- profile_target_genes(
   annotation_res = res_integrated,
   diff_file = diff_path,
@@ -712,7 +712,7 @@ res_B <- profile_target_genes(
 
 By setting `use_nearest_gene = TRUE`, this mode intentionally bypasses the 3D spatial topology and assigns features exclusively to their nearest neighboring gene. It serves as a conventional “baseline control.” Comparing results against Example A or B enables rigorous demonstration of the novel functional insights gained from 3D chromatin looping analyses relative to conventional method.
 
-```{r profiling_scenario_C, message=FALSE, warning=FALSE}
+```{r profiling_scenario_C, message=FALSE, warning=FALSE, eval=requireNamespace("ggpointdensity", quietly=TRUE) && requireNamespace("viridis", quietly=TRUE) && requireNamespace("ggpubr", quietly=TRUE) && requireNamespace("ggdist", quietly=TRUE)}
 res_C <- profile_target_genes(
   annotation_res = res_integrated,
   diff_file = diff_path,
