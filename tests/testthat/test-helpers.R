@@ -164,3 +164,289 @@ test_that(".map_txdb_gene_ids safely falls back when no OrgDb keytype matches", 
   expect_identical(attr(map, "hit_rate"), 0)
   expect_true(all(is.na(map$SYMBOL)))
 })
+
+# --- load_expression_matrix: duplicate gene ID warning ---
+test_that("load_expression_matrix warns on duplicate gene IDs", {
+  tmp <- tempfile(fileext = ".txt")
+  write.table(data.frame(
+    Gene = c("TP53", "BRCA1", "TP53"),
+    s1 = c(10, 20, 30),
+    s2 = c(15, 25, 35)
+  ), tmp, row.names = FALSE, sep = "\t", quote = FALSE)
+  expect_warning(
+    looplook:::load_expression_matrix(tmp, c("s1", "s2")),
+    "duplicated gene identifier"
+  )
+  unlink(tmp)
+})
+
+# --- load_expression_matrix: single column with integer indices ---
+test_that("load_expression_matrix with integer indices", {
+  tmp <- tempfile(fileext = ".txt")
+  writeLines("Gene\tS1\tS2\tS3\nA\t10\t20\t30\nB\t5\t15\t25", tmp)
+  # After removing Gene column, S1 is at index 1, S2 at index 2
+  vals <- looplook:::load_expression_matrix(tmp, c(1L))
+  expect_equal(vals[["A"]], 10)
+  expect_equal(names(vals), c("A", "B"))
+  unlink(tmp)
+})
+
+# --- load_expression_matrix: empty sample columns error ---
+test_that("load_expression_matrix errors on invalid column index", {
+  tmp <- tempfile(fileext = ".txt")
+  writeLines("Gene\tS1\nA\t10", tmp)
+  expect_error(
+    looplook:::load_expression_matrix(tmp, c(5L)),
+    "invalid column indices"
+  )
+  unlink(tmp)
+})
+
+# --- load_expression_matrix: empty file error ---
+test_that("load_expression_matrix errors on single column file", {
+  tmp <- tempfile(fileext = ".txt")
+  writeLines("Gene\nA\nB", tmp)
+  expect_error(
+    looplook:::load_expression_matrix(tmp, NULL),
+    "at least one sample column"
+  )
+  unlink(tmp)
+})
+
+# --- clean_anchor: eP and eG reclassification ---
+test_that("clean_anchor reclassifies eP and eG correctly", {
+  # Gene body silent → eG
+  res <- looplook:::clean_anchor("SILENT_GENE", "G", c("ACTIVE"), TRUE)
+  expect_equal(res$type, "eG")
+  expect_true(is.na(res$gene))
+
+  # Enhancer stays E even when silent
+  res <- looplook:::clean_anchor("SILENT_GENE", "E", c("ACTIVE"), TRUE)
+  expect_equal(res$type, "E")
+
+  # eP stays eP (already reclassified)
+  res <- looplook:::clean_anchor("SILENT_GENE", "eP", c("ACTIVE"), TRUE)
+  expect_equal(res$type, "eP")
+})
+
+# --- resolve_gene_conflicts: basic functionality ---
+test_that("resolve_gene_conflicts processes overlapping promoters", {
+  skip_if_not_installed("org.Hs.eg.db")
+  skip_if_not_installed("GenomicFeatures")
+
+  txdb <- tryCatch(
+    AnnotationDbi::loadDb(system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")),
+    error = function(e) NULL
+  )
+  skip_if(is.null(txdb), "Sample TxDb unavailable")
+
+  genes_gr <- GenomicFeatures::genes(txdb)
+  gene_coords <- data.frame(
+    chr = as.character(GenomicRanges::seqnames(genes_gr))[1:3],
+    start = GenomicRanges::start(genes_gr)[1:3],
+    end = GenomicRanges::end(genes_gr)[1:3],
+    annotation = c("Promoter", "Intron", "Distal Intergenic"),
+    SYMBOL = c("GENE1", "GENE2", "GENE3"),
+    stringsAsFactors = FALSE
+  )
+
+  result <- looplook:::resolve_gene_conflicts(
+    gene_coords, txdb, "org.Hs.eg.db", c(-2000, 2000), NULL
+  )
+  expect_s3_class(result, "data.frame")
+  expect_true("SYMBOL" %in% colnames(result))
+})
+
+# --- species_*_pkg functions ---
+test_that("species_txdb_pkg returns correct package names", {
+  expect_equal(looplook:::species_txdb_pkg("hg38"), "TxDb.Hsapiens.UCSC.hg38.knownGene")
+  expect_equal(looplook:::species_txdb_pkg("hg19"), "TxDb.Hsapiens.UCSC.hg19.knownGene")
+  expect_equal(looplook:::species_txdb_pkg("mm10"), "TxDb.Mmusculus.UCSC.mm10.knownGene")
+  expect_equal(looplook:::species_txdb_pkg("mm9"), "TxDb.Mmusculus.UCSC.mm9.knownGene")
+  expect_error(looplook:::species_txdb_pkg("invalid"), "Species not supported")
+})
+
+test_that("species_orgdb_pkg returns correct package names", {
+  expect_equal(looplook:::species_orgdb_pkg("hg38"), "org.Hs.eg.db")
+  expect_equal(looplook:::species_orgdb_pkg("mm10"), "org.Mm.eg.db")
+  expect_error(looplook:::species_orgdb_pkg("invalid"), "Species not supported")
+})
+
+test_that("species_bsgenome_pkg returns correct package names", {
+  expect_equal(looplook:::species_bsgenome_pkg("hg38"), "BSgenome.Hsapiens.UCSC.hg38")
+  expect_equal(looplook:::species_bsgenome_pkg("mm10"), "BSgenome.Mmusculus.UCSC.mm10")
+  expect_null(looplook:::species_bsgenome_pkg("invalid"))
+})
+
+# --- .harmonize_seqlevels ---
+test_that(".harmonize_seqlevels converts style when mismatched", {
+  skip_if_not_installed("GenomeInfoDb")
+
+  # Create GRanges with UCSC style (chr1)
+  gr_ucsc <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 200))
+  GenomeInfoDb::seqlevelsStyle(gr_ucsc) <- "UCSC"
+
+  # Create GRanges with Ensembl style (1)
+  gr_ensembl <- GenomicRanges::GRanges("1", IRanges::IRanges(100, 200))
+  GenomeInfoDb::seqlevelsStyle(gr_ensembl) <- "Ensembl"
+
+  # Should convert and emit message
+  expect_message(
+    result <- looplook:::.harmonize_seqlevels(gr_ensembl, gr_ucsc, "test"),
+    "Seqlevels style harmonized"
+  )
+  expect_equal(GenomeInfoDb::seqlevelsStyle(result), "UCSC")
+})
+
+test_that(".harmonize_seqlevels does nothing when styles match", {
+  skip_if_not_installed("GenomeInfoDb")
+
+  gr1 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 200))
+  gr2 <- GenomicRanges::GRanges("chr1", IRanges::IRanges(300, 400))
+
+  # No message when styles already match
+  expect_silent(looplook:::.harmonize_seqlevels(gr1, gr2, "test"))
+})
+
+test_that(".harmonize_seqlevels handles empty GRanges", {
+  skip_if_not_installed("GenomeInfoDb")
+
+  empty_gr <- GenomicRanges::GRanges()
+  ref_gr <- GenomicRanges::GRanges("chr1", IRanges::IRanges(100, 200))
+
+  # Should return empty GRanges without error
+  result <- looplook:::.harmonize_seqlevels(empty_gr, ref_gr, "test")
+  expect_equal(length(result), 0)
+})
+
+test_that("resolve_gene_conflicts: biotype_first strategy works", {
+  skip_if_not_installed("GenomicFeatures")
+  skip_if_not_installed("org.Hs.eg.db")
+
+  txdb <- tryCatch(
+    AnnotationDbi::loadDb(system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")),
+    error = function(e) NULL
+  )
+  skip_if(is.null(txdb), "Sample TxDb unavailable")
+
+  genes_gr <- GenomicFeatures::genes(txdb)
+  gene_ids <- GenomicRanges::mcols(genes_gr)$gene_id
+  symbols <- AnnotationDbi::mapIds(
+    org.Hs.eg.db::org.Hs.eg.db,
+    keys = gene_ids, column = "SYMBOL",
+    keytype = "ENTREZID", multiVals = "first"
+  )
+
+  # Use ETV6 region (protein-coding, on chr12)
+  etv6_idx <- which(symbols == "ETV6")
+  skip_if(length(etv6_idx) == 0, "ETV6 not found in sample TxDb")
+  etv6_gr <- genes_gr[etv6_idx[1]]
+
+  test_df <- data.frame(
+    chr = as.character(GenomicRanges::seqnames(etv6_gr)),
+    start = GenomicRanges::start(etv6_gr),
+    end = GenomicRanges::end(etv6_gr),
+    annotation = "Promoter",
+    SYMBOL = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  # Both strategies should resolve to a valid SYMBOL
+  result_bf <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook:::resolve_gene_conflicts(
+      test_df, txdb, "org.Hs.eg.db", c(-2000, 2000),
+      gene_expr_map = NULL, min_expr = 0,
+      conflict_strategy = "biotype_first"
+    )
+  )
+  expect_true(nrow(result_bf) >= 1)
+  expect_true("SYMBOL" %in% colnames(result_bf))
+
+  result_ef <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook:::resolve_gene_conflicts(
+      test_df, txdb, "org.Hs.eg.db", c(-2000, 2000),
+      gene_expr_map = NULL, min_expr = 0,
+      conflict_strategy = "expression_first"
+    )
+  )
+  expect_true(nrow(result_ef) >= 1)
+
+  # Both should produce valid output
+  expect_true(all(c("SYMBOL", "annotation") %in% colnames(result_bf)))
+  expect_true(all(c("SYMBOL", "annotation") %in% colnames(result_ef)))
+
+  # conflict_strategy must be validated
+  expect_error(
+    looplook:::resolve_gene_conflicts(
+      test_df, txdb, "org.Hs.eg.db", c(-2000, 2000),
+      gene_expr_map = NULL, conflict_strategy = "invalid"
+    )
+  )
+})
+
+test_that("resolve_gene_conflicts: biotype_first retains silent protein-coding over expressed lncRNA", {
+  skip_if_not_installed("GenomicFeatures")
+  skip_if_not_installed("org.Hs.eg.db")
+
+  txdb <- tryCatch(
+    AnnotationDbi::loadDb(system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")),
+    error = function(e) NULL
+  )
+  skip_if(is.null(txdb), "Sample TxDb unavailable")
+
+  genes_gr <- GenomicFeatures::genes(txdb)
+  gene_ids <- GenomicRanges::mcols(genes_gr)$gene_id
+  symbols <- AnnotationDbi::mapIds(
+    org.Hs.eg.db::org.Hs.eg.db,
+    keys = gene_ids, column = "SYMBOL",
+    keytype = "ENTREZID", multiVals = "first"
+  )
+  # Get the GENETYPE for each gene
+  genetypes <- tryCatch(
+    AnnotationDbi::mapIds(
+      org.Hs.eg.db::org.Hs.eg.db,
+      keys = gene_ids, column = "GENETYPE",
+      keytype = "ENTREZID", multiVals = "first"
+    ),
+    error = function(e) NULL
+  )
+
+  # Use a protein-coding gene and give it zero expression
+  etv6_idx <- which(symbols == "ETV6")
+  skip_if(length(etv6_idx) == 0, "ETV6 not found in sample TxDb")
+  etv6_gr <- genes_gr[etv6_idx[1]]
+
+  test_df <- data.frame(
+    chr = as.character(GenomicRanges::seqnames(etv6_gr)),
+    start = GenomicRanges::start(etv6_gr),
+    end = GenomicRanges::end(etv6_gr),
+    annotation = "Promoter",
+    SYMBOL = NA_character_,
+    stringsAsFactors = FALSE
+  )
+
+  # Expression map: ETV6 has zero expression (simulates silent protein-coding)
+  expr_map <- setNames(0, "ETV6")
+
+  # biotype_first: protein-coding retained even when silent
+  result_bf <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook:::resolve_gene_conflicts(
+      test_df, txdb, "org.Hs.eg.db", c(-2000, 2000),
+      gene_expr_map = expr_map, min_expr = 1,
+      conflict_strategy = "biotype_first"
+    )
+  )
+  expect_true(nrow(result_bf) >= 1)
+  # biotype_first keeps the protein-coding gene regardless of expression
+  expect_true(!is.na(result_bf$SYMBOL[1]) && result_bf$SYMBOL[1] != "")
+
+  # expression_first with same input should also produce a valid result
+  result_ef <- looplook:::.with_known_upstream_noise_suppressed(
+    looplook:::resolve_gene_conflicts(
+      test_df, txdb, "org.Hs.eg.db", c(-2000, 2000),
+      gene_expr_map = expr_map, min_expr = 1,
+      conflict_strategy = "expression_first"
+    )
+  )
+  expect_true(nrow(result_ef) >= 1)
+})

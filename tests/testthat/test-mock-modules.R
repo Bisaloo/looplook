@@ -112,8 +112,7 @@ test_that("run_lfc_violin handles t.test and edge cases", {
   expect_null(looplook:::run_lfc_violin(targets[1:2], global_glist, "t.test", "TooFew"))
 
   # invalid stat test
-  p_inv <- looplook:::run_lfc_violin(targets, global_glist, "invalid", "Bad")
-  expect_s3_class(p_inv, "ggplot") # uses t.test as default
+  expect_error(looplook:::run_lfc_violin(targets, global_glist, "invalid", "Bad"))
 })
 
 test_that("build_refinement_plots returns expected plot names", {

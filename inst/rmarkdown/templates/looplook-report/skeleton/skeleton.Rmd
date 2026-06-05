@@ -33,7 +33,7 @@ params:
   run_go: true
   run_ppi: false
   run_motif: false
-  genome_id: ""
+  genome_id: null
   motif_p_thresh: 1e-4
   motif_ntop: 5
   ppi_score: 400
@@ -283,8 +283,8 @@ plot_descriptions <- list(
   Karyo_LoopGenes = "This karyotype heatmap shows the chromosomal distribution of genes connected via chromatin loops. High-density regions may indicate transcriptionally active chromosomal territories.",
   Karyo_TargetGenes = "This karyotype heatmap shows the chromosomal density of assigned target genes. Comparing with Karyo_Anchors reveals whether regulatory features and their targets co-localise on the same chromosomes or operate in trans.",
   Comparison_Dumbbell = "This dumbbell chart compares the count of each loop type before (grey dot) versus after (yellow dot) expression-based filtering. The connecting line indicates the magnitude of change. Large drops suggest that many loops of that type involved transcriptionally silent genes.",
-  Rose = "This post-refinement rose chart shows the proportion of remaining loop types after expression-aware filtering. It reveals which interaction topologies are most robust to expression-based quality control.",
-  Target_Loop_Donut = "This post-refinement donut plot shows the genomic annotation distribution of target features after removing transcriptionally silent contacts. Comparing with the pre-refinement Target_Rose reveals how expression filtering reshapes the regulatory landscape.",
+  Rose = "This post-refinement rose chart shows the proportion of loop types in the full refined structural network after reclassification (P→eP, G→eG). It reveals which interaction topologies are most affected by reclassification. For the active functional subset, filter on Retained_In_Functional_Network.",
+  Target_Loop_Donut = "This post-refinement donut plot shows the genomic annotation distribution of target features across the full refined structural network. Comparing with the pre-refinement Target_Rose reveals how loop-type composition changes after refinement. For the functional subset (active targets only), filter on Retained_In_Functional_Network.",
   Refined_Karyo_Active = "This karyotype heatmap displays the chromosomal density of active (expressed) regulatory elements after refinement. Colour intensity reflects the density of features whose linked genes exceed the expression threshold.",
   Refined_Karyo_TargetGenes = "This karyotype heatmap shows the chromosomal distribution of target genes retained after expression filtering. Comparing with the pre-refinement Karyo_TargetGenes reveals chromosomes where target assignments were most affected by transcriptional filtering.",
   Target_Sankey = "Core integration diagnostic that maps the fate of inputted genomic features across three logical tiers: Genomic Region (L1) → 3D Loop Connection (L2) → Target Expression Status (L3). This intuitively reveals the proportion of GWAS/ChIP-seq peaks structurally connected to functionally active genes.",
@@ -331,8 +331,15 @@ if (!is.null(precomp)) {
     } else {
       objs <- ls(tmp_env)
       is_l <- vapply(objs, function(x) is.list(get(x, envir = tmp_env)), logical(1))
-      if (any(is_l)) res <- get(objs[which(is_l)[1]], envir = tmp_env)
-      else stop("Could not find suitable result object in precomputed_res.")
+      if (any(is_l)) {
+        chosen <- objs[which(is_l)[1]]
+        if (sum(is_l) > 1) {
+          warning("Multiple list objects in precomputed_res. Using '", chosen,
+                  "'. Save with save(res_integrated, file = \"my.RData\").",
+                  call. = FALSE)
+        }
+        res <- get(chosen, envir = tmp_env)
+      } else stop("Could not find suitable result object in precomputed_res.")
     }
     use_precomputed <- TRUE
     has_precomp <- TRUE
@@ -505,7 +512,7 @@ cat(sprintf("\nOf the **%s** features analyzed, **%s%%** were successfully linke
 
 ## Global Topology Summary
 
-```{r annotation-donut, results='asis', fig.cap="Figure 1: Composition of the Spatial Interaction Landscape."}
+```{r annotation-donut, results='asis', fig.cap="Composition of the Spatial Interaction Landscape."}
 if (!is.null(res$plots) && !is.null(res$plots$Basic_Donut)) {
   render_plot_container(res$plots$Basic_Donut,
     description = plot_descriptions[["Basic_Donut"]])
@@ -520,16 +527,25 @@ if (!is.null(res$plots) && !is.null(res$plots$Basic_Donut)) {
 ```{r annotation-table-top}
 if (!is.null(ta) && nrow(ta) > 0) {
   coord_cols <- intersect(c("seqnames", "start", "end", "width"), colnames(ta))
-  anno_cols  <- intersect(c("annotation", "SYMBOL", "loop_type",
+  anno_cols <- intersect(c("annotation", "SYMBOL", "loop_type",
     "Linked_Loop_IDs", "All_Loop_Connected_Genes",
-    "Regulated_promoter_genes", "Assigned_Target_Genes",
+    "Regulated_promoter_genes", "Regulated_promoter_Evidence",
+    "Assigned_Target_Genes",
     "All_Loop_Connected_Genes_Filled",
     "Regulated_promoter_genes_Filled",
+    "Regulated_promoter_Fallback_Evidence",
     "Assigned_Target_Genes_Filled"), colnames(ta))
   show_cols <- c(coord_cols, anno_cols)
   show_cols <- show_cols[vapply(ta[show_cols], function(x) !all(is.na(x)), logical(1))]
-  
+
   render_table(ta[, show_cols])
+}
+```
+
+```{r annotation-target-links}
+if (!is.null(res$target_gene_links) && nrow(res$target_gene_links) > 0) {
+  cat('<div class="table-caption">Target gene evidence links</div>\n')
+  render_table(res$target_gene_links, head_n = 50)
 }
 ```
 
@@ -538,7 +554,7 @@ if (!is.null(ta) && nrow(ta) > 0) {
 la <- res$loop_annotation
 if (!is.null(la) && nrow(la) > 0) {
   loop_show <- intersect(c("loop_ID", "chr1", "start1", "end1", "chr2", "start2", "end2",
-    "loop_type", "anchor1_gene", "anchor2_gene", "All_Anchor_Genes",
+    "loop_type", "anchor1_type", "anchor1_gene", "anchor2_type", "anchor2_gene", "All_Anchor_Genes",
     "Putative_Target_Genes", "Cluster_All_Genes"), colnames(la))
   render_table(la[, loop_show])
 }
@@ -654,15 +670,21 @@ if (!is.null(rta) && nrow(rta) > 0) {
   cat("\n## Refined Target Assignments\n")
   cat('<div class="table-caption">Refined feature-to-target mapping</div>\n')
   coord_cols <- intersect(c("seqnames", "start", "end", "width"), colnames(rta))
-  anno_cols  <- intersect(c("annotation", "SYMBOL", "loop_type",
+  anno_cols <- intersect(c("annotation", "SYMBOL", "loop_type",
     "Linked_Loop_IDs", "All_Loop_Connected_Genes",
-    "Regulated_promoter_genes", "Assigned_Target_Genes",
+    "Regulated_promoter_genes", "Regulated_promoter_Evidence",
+    "Assigned_Target_Genes",
     "All_Loop_Connected_Genes_Filled",
     "Regulated_promoter_genes_Filled",
+    "Regulated_promoter_Fallback_Evidence",
     "Assigned_Target_Genes_Filled"), colnames(rta))
   rshow <- c(coord_cols, anno_cols)
   rshow <- rshow[vapply(rta[rshow], function(x) !all(is.na(x)), logical(1))]
   print(render_table(rta[, rshow]))
+}
+if (!is.null(refined$target_gene_links) && nrow(refined$target_gene_links) > 0) {
+  cat('<div class="table-caption">Refined target gene evidence links</div>\n')
+  print(render_table(refined$target_gene_links, head_n = 50))
 }
 
 rpc <- refined$promoter_centric_stats
@@ -678,7 +700,7 @@ if (!is.null(rla) && nrow(rla) > 0) {
   cat("\n## Refined Loop Annotation\n")
   cat('<div class="table-caption">Refined loop-to-gene associations (all filtered loops)</div>\n')
   loop_show <- intersect(c("loop_ID", "chr1", "start1", "end1", "chr2", "start2", "end2",
-    "loop_type", "anchor1_gene", "anchor2_gene", "All_Anchor_Genes",
+    "loop_type", "anchor1_type", "anchor1_gene", "anchor2_type", "anchor2_gene", "All_Anchor_Genes",
     "Putative_Target_Genes", "Cluster_All_Genes"), colnames(rla))
   print(render_table(rla[, loop_show]))
 }
@@ -765,7 +787,7 @@ profile_res <- tryCatch(
     run_go = params$run_go,
     run_ppi = effective_run_ppi,
     run_motif = params$run_motif,
-    genome_id = params$genome_id,
+    genome_id = if (is.null(params$genome_id) || !nzchar(params$genome_id)) params$species else params$genome_id,
     motif_p_thresh = params$motif_p_thresh,
     motif_ntop = params$motif_ntop,
     ppi_score = params$ppi_score,
@@ -919,14 +941,18 @@ if (has_any_plot) {
     if (!is.null(go_df) && is.data.frame(go_df) && nrow(go_df) > 0) {
       go_df <- go_df[order(go_df$pvalue), ]
       show <- intersect(c("Description", "ONTOLOGY", "pvalue", "p.adjust", "Count"), colnames(go_df))
-      go_widget <- DT::datatable(go_df[, show],
-        options = list(pageLength = 10, scrollX = TRUE, searching = TRUE,
-          autoWidth = FALSE, columnDefs = list(list(width = "40%%", targets = 0))),
-        class = "stripe hover compact", rownames = FALSE)
-      if (requireNamespace("htmltools", quietly = TRUE))
-        print(htmltools::tagList(go_widget))
-      else
-        print(go_widget)
+      if (has_dt) {
+        go_widget <- DT::datatable(go_df[, show],
+          options = list(pageLength = 10, scrollX = TRUE, searching = TRUE,
+            autoWidth = FALSE, columnDefs = list(list(width = "40%%", targets = 0))),
+          class = "stripe hover compact", rownames = FALSE)
+        if (requireNamespace("htmltools", quietly = TRUE))
+          print(htmltools::tagList(go_widget))
+        else
+          print(go_widget)
+      } else {
+        render_table(go_df[, show])
+      }
     } else {
       cat("*No significantly enriched GO terms found.*\n\n")
     }

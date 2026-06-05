@@ -7,15 +7,13 @@ shrink_annotation_res <- function(res, n_loops = 15L, n_targets = 6L, n_stats = 
     kept_clusters <- unique(stats::na.omit(res$loop_annotation$cluster_id))
     if (!is.null(res$anchor_loci_annotation) && "cluster_id" %in% colnames(res$anchor_loci_annotation)) {
       res$anchor_loci_annotation <- res$anchor_loci_annotation[
-        res$anchor_loci_annotation$cluster_id %in% kept_clusters,
-        ,
+        res$anchor_loci_annotation$cluster_id %in% kept_clusters, ,
         drop = FALSE
       ]
     }
     if (!is.null(res$anchor_annotation) && "cluster_id" %in% colnames(res$anchor_annotation)) {
       res$anchor_annotation <- res$anchor_annotation[
-        res$anchor_annotation$cluster_id %in% kept_clusters,
-        ,
+        res$anchor_annotation$cluster_id %in% kept_clusters, ,
         drop = FALSE
       ]
     }
@@ -486,12 +484,12 @@ test_that("profile_target_genes runs without OrgDb if GO analysis is disabled", 
           annotation_res = res,
           diff_file = diff_path,
           expr_matrix_file = expr_path,
-        metadata_file = meta_path,
-        target_source = "loops",
-        project_name = "no_orgdb_needed",
-        org_db = "definitelyNotAPackage",
-        run_go = FALSE,
-        run_ppi = FALSE,
+          metadata_file = meta_path,
+          target_source = "loops",
+          project_name = "no_orgdb_needed",
+          org_db = "definitelyNotAPackage",
+          run_go = FALSE,
+          run_ppi = FALSE,
           run_motif = FALSE
         )
       )

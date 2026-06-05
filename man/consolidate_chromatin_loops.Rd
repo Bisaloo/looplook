@@ -9,10 +9,12 @@ consolidate_chromatin_loops(
   gap = 1000,
   mode = c("consensus", "intersect", "union"),
   min_consensus = NULL,
+  score_col = NULL,
   min_raw_score = NULL,
   min_score = NULL,
   blacklist_species = NULL,
   region_of_interest = NULL,
+  roi_mode = c("any", "both"),
   out_file = NULL,
   write_output = TRUE,
   quiet = FALSE
@@ -34,10 +36,14 @@ consolidate_chromatin_loops(
 (only effective when \code{mode = "consensus"}).
 If \code{NULL} (default), the threshold is automatically calculated:
 \itemize{
-\item For 2 replicates: Requires both (2/2).
-\item For >2 replicates: Requires strict majority (>75\\% support).
-\item (e.g., 3 for N=3, 4 for N=4, 4 for N=5).
+\item For 2–3 replicates: Requires all (100\\%).
+\item For \eqn{N \ge 4}: Requires \eqn{\lfloor 0.75N \rfloor + 1}
+(e.g., 3 for N=4, 4 for N=5, 7 for N=8).
 }}
+
+\item{score_col}{Integer or \code{NULL}. Column index to use as interaction
+score when reading BEDPE files. Passed to \code{\link{bedpe_to_gi}}.
+If \code{NULL} (default), auto-detection is used (see \code{\link{bedpe_to_gi}}).}
 
 \item{min_raw_score}{Numeric. \strong{Pre-filtering threshold}. Loops with a raw score (e.g., read count) below this value in individual files will be discarded \strong{before} any merging or intersection.
 \itemize{
@@ -55,7 +61,13 @@ If \code{NULL} (default), the threshold is automatically calculated:
 \item{blacklist_species}{Character. Species/build for built-in blacklist
 (e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.}
 
-\item{region_of_interest}{Character. Path to BED file. Only loops overlapping these regions will be kept.}
+\item{region_of_interest}{Character. Path to BED file defining regions of interest (ROI). Only loops overlapping these regions will be kept.}
+
+\item{roi_mode}{Character. How loops must overlap \code{region_of_interest}.
+\code{"any"} (default): keep loops where \emph{either} anchor overlaps the ROI
+(suitable for promoter-centric or enhancer-gene queries).
+\code{"both"}: keep loops where \emph{both} anchors overlap the ROI
+(suitable for TAD confinement or domain-internal interaction queries).}
 
 \item{out_file}{Character. The file name (including the file path) for saving results in the extended BEDPE format.}
 
@@ -64,7 +76,16 @@ If \code{NULL} (default), the threshold is automatically calculated:
 \item{quiet}{Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.}
 }
 \value{
-A filtered \code{\link[InteractionSet]{GInteractions}} object.
+A filtered \code{\link[InteractionSet]{GInteractions}} object with metadata columns:
+\describe{
+\item{\code{score}}{Replicate-balanced consensus score.}
+\item{\code{n_members}}{Number of raw loops merged into this entry
+(1 for intersect mode where no coordinate merging occurs).}
+\item{\code{n_reps}}{Number of input files that support this entry.}
+}
+When \code{write_output = TRUE} and \code{out_file} is provided, an extended
+BEDPE file is written with the additional columns \code{n_members} and
+\code{n_reps} appended after the standard BEDPE fields.
 }
 \description{
 This function consolidates chromatin loops from multiple BEDPE files. It is designed for two main purposes:
@@ -79,6 +100,11 @@ The function supports three modes:
 \item \code{"intersect"}: Enforces strict reference-based filtering, retaining loops that show full genomic overlap with the reference file (File 1).
 \item \code{"union"}: Retains all chromatin interactions across the entire cohort, ideal for exploratory pan-tissue analyses.
 }
+
+\strong{Connected-component chaining}: Graph-based clustering may
+transitively chain loci (A–B and B–C merge, pulling A and C into the same
+cluster even if they are far apart). Inspect \code{n_members} in the
+output and reduce \code{gap} if clusters appear inflated.
 
 It also supports a \strong{two-stage filtering strategy} to maximize signal-to-noise ratio:
 \itemize{

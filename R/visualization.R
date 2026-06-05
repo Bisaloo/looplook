@@ -1,3 +1,324 @@
+#' Internal: Resolve Annotation Database for Track Plot
+#' @keywords internal
+#' @noRd
+.resolve_track_annotation_db <- function(arg, species_map, species, desc) {
+  if (any(inherits(arg, c("TxDb", "OrgDb", "AnnotationDb")))) {
+    return(arg)
+  }
+  if (is.character(arg) && length(arg) == 1L && nzchar(arg)) {
+    if (!requireNamespace(arg, quietly = TRUE)) {
+      stop(desc, " '", arg, "' not installed")
+    }
+    return(utils::getFromNamespace(arg, arg))
+  }
+  pkg <- species_map[[species]]
+  if (is.null(pkg)) {
+    stop("Species not supported: ", species)
+  }
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    stop(desc, " '", pkg, "' not installed")
+  }
+  utils::getFromNamespace(pkg, pkg)
+}
+
+#' Internal: Scale Values Within Groups
+#' @keywords internal
+#' @noRd
+.scale_group_positions <- function(values, groups) {
+  out <- numeric(length(values))
+  idx_split <- split(seq_along(values), groups)
+  for (idx in idx_split) {
+    if (length(idx) == 1) {
+      out[idx] <- 0.5
+    } else {
+      out[idx] <- scales::rescale(rank(values[idx], ties.method = "first"), to = c(0, 1))
+    }
+  }
+  out
+}
+
+#' Internal: Assign Arc Stacking Levels
+#' @keywords internal
+#' @noRd
+.assign_arc_levels <- function(left, right, max_levels) {
+  n <- length(left)
+  if (n == 0) {
+    return(data.frame(
+      raw_level = integer(0),
+      display_level = integer(0),
+      band_pos = numeric(0),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  left <- as.numeric(left)
+  right <- as.numeric(right)
+  span <- pmax(right - left, 1)
+  max_levels <- max(1L, as.integer(max_levels[1]))
+
+  raw_level <- integer(n)
+  level_right_edge <- numeric(0)
+  ord <- order(left, right)
+  for (idx in ord) {
+    reusable <- which(level_right_edge <= left[idx])
+    if (length(reusable) == 0) {
+      level_right_edge <- c(level_right_edge, right[idx])
+      raw_level[idx] <- length(level_right_edge)
+    } else {
+      use_level <- reusable[1]
+      raw_level[idx] <- use_level
+      level_right_edge[use_level] <- right[idx]
+    }
+  }
+
+  raw_max <- max(raw_level)
+  compressed <- raw_max > max_levels
+  display_level <- if (compressed) {
+    ceiling(raw_level / raw_max * max_levels)
+  } else {
+    raw_level
+  }
+  band_values <- if (compressed) raw_level else span
+  band_pos <- .scale_group_positions(band_values, display_level)
+
+  data.frame(
+    raw_level = raw_level,
+    display_level = display_level,
+    band_pos = band_pos,
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Internal: Test Numeric-Like Column
+#' @keywords internal
+#' @noRd
+.is_numeric_like_col <- function(x) {
+  nums <- as.numeric(x)
+  sum(!is.na(nums)) / length(nums) > 0.9 && !all(is.na(nums))
+}
+
+#' Internal: Apply Score-Scaled Alpha to a Base Colour
+#' @keywords internal
+#' @noRd
+.calc_alpha_color <- function(scores, base_col, use_alpha) {
+  if (anyNA(scores)) scores[is.na(scores)] <- min(scores, na.rm = TRUE)
+  alphas <- if (use_alpha && max(scores) != min(scores)) {
+    scales::rescale(scores, to = c(0.1, 1.0))
+  } else {
+    rep(0.8, length(scores))
+  }
+  rgb_val <- col2rgb(base_col)
+  rgb(rgb_val[1], rgb_val[2], rgb_val[3],
+    alpha = alphas * 255,
+    maxColorValue = 255
+  )
+}
+
+#' Internal: Read BEDPE for Track Plot
+#' @keywords internal
+#' @noRd
+.read_track_bedpe <- function(bedpe_file, min_score = NULL) {
+  loops_raw <- as.data.frame(data.table::fread(bedpe_file, header = FALSE))
+  colnames(loops_raw)[seq_len(6)] <- c(
+    "chr1", "start1", "end1", "chr2",
+    "start2", "end2"
+  )
+  loops_raw$start1 <- loops_raw$start1 + 1
+  loops_raw$start2 <- loops_raw$start2 + 1
+
+  has_score <- FALSE
+  if (ncol(loops_raw) >= 7) {
+    if (ncol(loops_raw) >= 8 && .is_numeric_like_col(loops_raw[[8]])) {
+      colnames(loops_raw)[8] <- "score"
+      has_score <- TRUE
+    } else if (.is_numeric_like_col(loops_raw[[7]])) {
+      colnames(loops_raw)[7] <- "score"
+      has_score <- TRUE
+    }
+  }
+
+  loops <- loops_raw %>%
+    dplyr::mutate(
+      dplyr::across(c(start1, end1, start2, end2), as.numeric),
+      chr1 = as.character(chr1), chr2 = as.character(chr2)
+    )
+  if (has_score) {
+    loops$score <- as.numeric(loops$score)
+    if (!is.null(min_score)) {
+      loops <- loops %>% dplyr::filter(score >= min_score)
+      if (nrow(loops) == 0) stop("All loops filtered by min_score.")
+    }
+  }
+
+  list(loops = loops, has_score = has_score)
+}
+
+#' Internal: Build Track Loop Arcs
+#' @keywords internal
+#' @noRd
+.build_track_loop_layers <- function(
+  loops_view, has_score, max_levels, anchor_ymax,
+  loop_color, anchor_color, score_to_alpha
+) {
+  bez_df <- data.frame()
+  anchors <- data.frame()
+  plot_ymax <- anchor_ymax + 0.5
+
+  if (nrow(loops_view) == 0) {
+    return(list(bez_df = bez_df, anchors = anchors, plot_ymax = plot_ymax))
+  }
+
+  anchors <- dplyr::bind_rows(
+    loops_view %>% dplyr::transmute(
+      chr = chr1, start = start1, end = end1,
+      loop_i = dplyr::row_number(), score = if (has_score) score else 1
+    ),
+    loops_view %>% dplyr::transmute(
+      chr = chr2, start = start2, end = end2,
+      loop_i = dplyr::row_number(), score = if (has_score) score else 1
+    )
+  ) %>% dplyr::mutate(ymin = 0, ymax = anchor_ymax)
+
+  loops_calc <- loops_view %>%
+    dplyr::mutate(
+      mid1 = (start1 + end1) / 2, mid2 = (start2 + end2) / 2,
+      left_mid = pmin(mid1, mid2), right_mid = pmax(mid1, mid2)
+    ) %>%
+    dplyr::mutate(
+      span = pmax(.data$right_mid - .data$left_mid, 1),
+      loop_i = dplyr::row_number(), center = (mid1 + mid2) / 2
+    )
+  level_df <- .assign_arc_levels(loops_calc$left_mid, loops_calc$right_mid, max_levels)
+  loops_calc <- cbind(loops_calc, level_df)
+
+  peak_base <- anchor_ymax + 0.08
+  level_band <- 0.11
+  band_height <- 0.045
+  loops_calc$peak <- peak_base +
+    (loops_calc$display_level - 1) * level_band +
+    loops_calc$band_pos * band_height
+  loops_calc <- loops_calc[order(loops_calc$peak, loops_calc$span), , drop = FALSE]
+
+  bez_list <- lapply(seq_len(nrow(loops_calc)), function(i) {
+    d <- loops_calc[i, ]
+    data.frame(
+      loop_i = d$loop_i,
+      x = c(d$mid1, d$center, d$mid2),
+      y = c(anchor_ymax, d$peak, anchor_ymax),
+      arc_level = d$display_level,
+      score = if (has_score) d$score else 1, stringsAsFactors = FALSE
+    )
+  })
+  bez_df <- do.call(rbind, bez_list)
+  plot_ymax <- max(bez_df$y) + 0.08
+
+  do_map <- has_score && score_to_alpha
+  bez_df$final_color <- .calc_alpha_color(bez_df$score, loop_color, do_map)
+  anchors$final_fill <- .calc_alpha_color(anchors$score, anchor_color, do_map)
+
+  list(bez_df = bez_df, anchors = anchors, plot_ymax = plot_ymax)
+}
+
+#' Internal: Prepare Overlap Track Data
+#' @keywords internal
+#' @noRd
+.prepare_overlap_track <- function(target_bed, chr, from, to) {
+  if (is.null(target_bed)) {
+    return(NULL)
+  }
+  ob <- as.data.frame(data.table::fread(target_bed, header = FALSE, select = seq_len(3)))
+  colnames(ob) <- c("chr", "start", "end")
+  ob$start <- ob$start + 1 # BED is 0-based; convert to 1-based
+  overlap_df_plot <- ob %>%
+    dplyr::filter(chr == !!chr, !(end < from | start > to)) %>%
+    dplyr::mutate(ymin = -0.15, ymax = -0.10)
+  if (nrow(overlap_df_plot) == 0) {
+    return(NULL)
+  }
+  overlap_df_plot
+}
+
+#' Internal: Prepare Gene Track Data
+#' @keywords internal
+#' @noRd
+.prepare_gene_track_data <- function(txdb_obj, org_db_ref, chr, from, to) {
+  feature_df <- data.frame()
+  genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
+  genes_df <- as.data.frame(genes_gr) %>%
+    dplyr::filter(as.character(seqnames) == chr, end > from, start < to)
+
+  if (nrow(genes_df) == 0) {
+    return(list(genes_df = genes_df, feature_df = feature_df))
+  }
+
+  try(
+    {
+      if (!is.null(org_db_ref)) {
+        symbol_map <- .map_txdb_gene_ids(
+          gene_ids = unique(as.character(genes_df$gene_id)),
+          org_db = org_db_ref,
+          columns = "SYMBOL",
+          context = "prepare_genomic_plot_data gene track",
+          warn = TRUE
+        )
+        symbol_map <- symbol_map[!duplicated(symbol_map$gene_id), ]
+        genes_df <- dplyr::left_join(genes_df, symbol_map, by = "gene_id")
+      }
+    },
+    silent = TRUE
+  )
+  if (!"SYMBOL" %in% colnames(genes_df)) {
+    genes_df$SYMBOL <- genes_df$gene_id
+  }
+  genes_df <- genes_df %>%
+    dplyr::mutate(
+      final_label = ifelse(is.na(SYMBOL), gene_id, SYMBOL),
+      label_x = pmax(from, pmin(to, ifelse(strand == "+", start, end)))
+    )
+  genes_df$gene_level <- IRanges::disjointBins(
+    IRanges::IRanges(genes_df$start, genes_df$end)
+  )
+
+  tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb_obj)) {
+    "TXNAME"
+  } else {
+    "TXID"
+  }
+  tx2gene <- AnnotationDbi::select(txdb_obj,
+    keys = AnnotationDbi::keys(txdb_obj, tx_keytype),
+    columns = "GENEID", keytype = tx_keytype
+  )
+  colnames(tx2gene) <- c("tx_id", "gene_id")
+
+  exons_list <- GenomicFeatures::exonsBy(txdb_obj, "tx", use.names = TRUE)
+  exons_gr <- unlist(exons_list)
+  names(exons_gr) <- NULL
+  exons_flat <- as.data.frame(exons_gr)
+  exons_flat$tx_id <- rep(names(exons_list),
+    times = S4Vectors::elementNROWS(exons_list)
+  )
+  exons_joined <- exons_flat %>%
+    dplyr::left_join(tx2gene, by = "tx_id") %>%
+    dplyr::filter(gene_id %in% genes_df$gene_id) %>%
+    dplyr::filter(start < to & end > from)
+
+  if (nrow(exons_joined) > 0) {
+    longest_tx <- exons_joined %>%
+      dplyr::group_by(gene_id, tx_id) %>%
+      dplyr::summarise(len = sum(width), .groups = "drop") %>%
+      dplyr::arrange(desc(len)) %>%
+      dplyr::group_by(gene_id) %>%
+      dplyr::slice(1)
+    feature_df <- exons_joined %>%
+      dplyr::filter(tx_id %in% longest_tx$tx_id) %>%
+      dplyr::left_join(genes_df[, c("gene_id", "gene_level")],
+        by = "gene_id"
+      )
+  }
+
+  list(genes_df = genes_df, feature_df = feature_df)
+}
+
 #' Internal: Prepare Track Data for IGV-Style Plot
 #'
 #' Reads BEDPE, optional BED, and gene annotation data; computes bezier curves,
@@ -25,88 +346,6 @@ prepare_track_data <- function(
   max_levels, base_anchor_height, loop_color, anchor_color, score_to_alpha,
   min_score, txdb = NULL, org_db = NULL, show_gene_track = TRUE
 ) {
-  .resolve_annotation_db <- function(arg, species_map, desc) {
-    if (any(inherits(arg, c("TxDb", "OrgDb", "AnnotationDb")))) {
-      return(arg)
-    }
-    if (is.character(arg) && length(arg) == 1L && nzchar(arg)) {
-      if (!requireNamespace(arg, quietly = TRUE)) {
-        stop(desc, " '", arg, "' not installed")
-      }
-      return(utils::getFromNamespace(arg, arg))
-    }
-    pkg <- species_map[[species]]
-    if (is.null(pkg)) {
-      stop("Species not supported: ", species)
-    }
-    if (!requireNamespace(pkg, quietly = TRUE)) {
-      stop(desc, " '", pkg, "' not installed")
-    }
-    utils::getFromNamespace(pkg, pkg)
-  }
-
-  .scale_group_positions <- function(values, groups) {
-    out <- numeric(length(values))
-    idx_split <- split(seq_along(values), groups)
-    for (idx in idx_split) {
-      if (length(idx) == 1) {
-        out[idx] <- 0.5
-      } else {
-        out[idx] <- scales::rescale(rank(values[idx], ties.method = "first"), to = c(0, 1))
-      }
-    }
-    out
-  }
-
-  .assign_arc_levels <- function(left, right, max_levels) {
-    n <- length(left)
-    if (n == 0) {
-      return(data.frame(
-        raw_level = integer(0),
-        display_level = integer(0),
-        band_pos = numeric(0),
-        stringsAsFactors = FALSE
-      ))
-    }
-
-    left <- as.numeric(left)
-    right <- as.numeric(right)
-    span <- pmax(right - left, 1)
-    max_levels <- max(1L, as.integer(max_levels[1]))
-
-    raw_level <- integer(n)
-    level_right_edge <- numeric(0)
-    ord <- order(left, right)
-    for (idx in ord) {
-      reusable <- which(level_right_edge <= left[idx])
-      if (length(reusable) == 0) {
-        level_right_edge <- c(level_right_edge, right[idx])
-        raw_level[idx] <- length(level_right_edge)
-      } else {
-        use_level <- reusable[1]
-        raw_level[idx] <- use_level
-        level_right_edge[use_level] <- right[idx]
-      }
-    }
-
-    raw_max <- max(raw_level)
-    compressed <- raw_max > max_levels
-    display_level <- if (compressed) {
-      ceiling(raw_level / raw_max * max_levels)
-    } else {
-      raw_level
-    }
-    band_values <- if (compressed) raw_level else span
-    band_pos <- .scale_group_positions(band_values, display_level)
-
-    data.frame(
-      raw_level = raw_level,
-      display_level = display_level,
-      band_pos = band_pos,
-      stringsAsFactors = FALSE
-    )
-  }
-
   txdb_obj <- NULL
   org_db_ref <- NULL
   if (isTRUE(show_gene_track)) {
@@ -122,53 +361,20 @@ prepare_track_data <- function(
       mm10 = "org.Mm.eg.db",
       mm9 = "org.Mm.eg.db"
     )
-    txdb_obj <- .resolve_annotation_db(txdb, tx_species, "TxDb")
+    txdb_obj <- .resolve_track_annotation_db(txdb, tx_species, species, "TxDb")
     if (!is.null(org_db)) {
-      org_db_ref <- .resolve_annotation_db(org_db, org_species, "OrgDb")
+      org_db_ref <- .resolve_track_annotation_db(org_db, org_species, species, "OrgDb")
     } else {
       org_db_ref <- tryCatch(
-        .resolve_annotation_db(NULL, org_species, "OrgDb"),
+        .resolve_track_annotation_db(NULL, org_species, species, "OrgDb"),
         error = function(e) NULL
       )
     }
   }
 
-  # Read BEDPE (0-based) and convert to 1-based for internal use
-  loops_raw <- as.data.frame(data.table::fread(bedpe_file, header = FALSE))
-  colnames(loops_raw)[seq_len(6)] <- c(
-    "chr1", "start1", "end1", "chr2",
-    "start2", "end2"
-  )
-  loops_raw$start1 <- loops_raw$start1 + 1
-  loops_raw$start2 <- loops_raw$start2 + 1
-
-  has_score <- FALSE
-  if (ncol(loops_raw) >= 7) {
-    is_numeric_col <- function(x) {
-      nums <- as.numeric(x)
-      sum(!is.na(nums)) / length(nums) > 0.9 && !all(is.na(nums))
-    }
-    if (ncol(loops_raw) >= 8 && is_numeric_col(loops_raw[[8]])) {
-      colnames(loops_raw)[8] <- "score"
-      has_score <- TRUE
-    } else if (is_numeric_col(loops_raw[[7]])) {
-      colnames(loops_raw)[7] <- "score"
-      has_score <- TRUE
-    }
-  }
-
-  loops <- loops_raw %>%
-    dplyr::mutate(
-      dplyr::across(c(start1, end1, start2, end2), as.numeric),
-      chr1 = as.character(chr1), chr2 = as.character(chr2)
-    )
-  if (has_score) {
-    loops$score <- as.numeric(loops$score)
-    if (!is.null(min_score)) {
-      loops <- loops %>% dplyr::filter(score >= min_score)
-      if (nrow(loops) == 0) stop("All loops filtered by min_score.")
-    }
-  }
+  bedpe_res <- .read_track_bedpe(bedpe_file, min_score)
+  loops <- bedpe_res$loops
+  has_score <- bedpe_res$has_score
 
   if (is.null(chr)) {
     all_chr <- c(loops$chr1, loops$chr2)
@@ -199,165 +405,31 @@ prepare_track_data <- function(
   text_indent <- from + ((to - from) * 0.005)
   anchor_ymax <- base_anchor_height
 
-  bez_df <- data.frame()
-  anchors <- data.frame()
-  plot_ymax <- anchor_ymax + 0.5
+  loop_layers <- .build_track_loop_layers(
+    loops_view = loops_view,
+    has_score = has_score,
+    max_levels = max_levels,
+    anchor_ymax = anchor_ymax,
+    loop_color = loop_color,
+    anchor_color = anchor_color,
+    score_to_alpha = score_to_alpha
+  )
+  overlap_df_plot <- .prepare_overlap_track(target_bed, chr, from, to)
 
-  if (nrow(loops_view) > 0) {
-    anchors <- dplyr::bind_rows(
-      loops_view %>% dplyr::transmute(
-        chr = chr1, start = start1, end = end1,
-        loop_i = dplyr::row_number(), score = if (has_score) score else 1
-      ),
-      loops_view %>% dplyr::transmute(
-        chr = chr2, start = start2, end = end2,
-        loop_i = dplyr::row_number(), score = if (has_score) score else 1
-      )
-    ) %>% dplyr::mutate(ymin = 0, ymax = anchor_ymax)
-
-    loops_calc <- loops_view %>%
-      dplyr::mutate(
-        mid1 = (start1 + end1) / 2, mid2 = (start2 + end2) / 2,
-        left_mid = pmin(mid1, mid2), right_mid = pmax(mid1, mid2)
-      ) %>%
-      dplyr::mutate(
-        span = pmax(.data$right_mid - .data$left_mid, 1),
-        loop_i = dplyr::row_number(), center = (mid1 + mid2) / 2
-      )
-    level_df <- .assign_arc_levels(loops_calc$left_mid, loops_calc$right_mid, max_levels)
-    loops_calc <- cbind(loops_calc, level_df)
-
-    peak_base <- anchor_ymax + 0.08
-    level_band <- 0.11
-    band_height <- 0.045
-    loops_calc$peak <- peak_base +
-      (loops_calc$display_level - 1) * level_band +
-      loops_calc$band_pos * band_height
-    loops_calc <- loops_calc[order(loops_calc$peak, loops_calc$span), , drop = FALSE]
-
-    bez_list <- lapply(seq_len(nrow(loops_calc)), function(i) {
-      d <- loops_calc[i, ]
-      data.frame(
-        loop_i = d$loop_i,
-        x = c(d$mid1, d$center, d$mid2),
-        y = c(anchor_ymax, d$peak, anchor_ymax),
-        arc_level = d$display_level,
-        score = if (has_score) d$score else 1, stringsAsFactors = FALSE
-      )
-    })
-    bez_df <- do.call(rbind, bez_list)
-    plot_ymax <- max(bez_df$y) + 0.08
-
-    calc_alpha_color <- function(scores, base_col, use_alpha) {
-      if (anyNA(scores)) scores[is.na(scores)] <- min(scores, na.rm = TRUE)
-      alphas <- if (use_alpha && max(scores) != min(scores)) {
-        scales::rescale(scores, to = c(0.1, 1.0))
-      } else {
-        rep(0.8, length(scores))
-      }
-      rgb_val <- col2rgb(base_col)
-      rgb(rgb_val[1], rgb_val[2], rgb_val[3],
-        alpha = alphas * 255,
-        maxColorValue = 255
-      )
-    }
-    do_map <- has_score && score_to_alpha
-    bez_df$final_color <- calc_alpha_color(bez_df$score, loop_color, do_map)
-    anchors$final_fill <- calc_alpha_color(anchors$score, anchor_color, do_map)
-  }
-
-  # Overlap BED
-  overlap_df_plot <- NULL
-  if (!is.null(target_bed)) {
-    ob <- as.data.frame(data.table::fread(target_bed, header = FALSE, select = seq_len(3)))
-    colnames(ob) <- c("chr", "start", "end")
-    ob$start <- ob$start + 1 # BED is 0-based; convert to 1-based
-    overlap_df_plot <- ob %>%
-      dplyr::filter(chr == !!chr, !(end < from | start > to)) %>%
-      dplyr::mutate(ymin = -0.15, ymax = -0.10)
-    if (nrow(overlap_df_plot) == 0) overlap_df_plot <- NULL
-  }
-
-  feature_df <- data.frame()
-  genes_df <- data.frame()
   if (isTRUE(show_gene_track)) {
-    genes_gr <- .with_known_upstream_noise_suppressed(GenomicFeatures::genes(txdb_obj))
-    genes_df <- as.data.frame(genes_gr) %>%
-      dplyr::filter(as.character(seqnames) == chr, end > from, start < to)
-  }
-
-  if (nrow(genes_df) > 0) {
-    try(
-      {
-        if (!is.null(org_db_ref)) {
-          symbol_map <- .map_txdb_gene_ids(
-            gene_ids = unique(as.character(genes_df$gene_id)),
-            org_db = org_db_ref,
-            columns = "SYMBOL",
-            context = "prepare_genomic_plot_data gene track",
-            warn = TRUE
-          )
-          symbol_map <- symbol_map[!duplicated(symbol_map$gene_id), ]
-          genes_df <- dplyr::left_join(genes_df, symbol_map, by = "gene_id")
-        }
-      },
-      silent = TRUE
-    )
-    if (!"SYMBOL" %in% colnames(genes_df)) {
-      genes_df$SYMBOL <- genes_df$gene_id
-    }
-    genes_df <- genes_df %>%
-      dplyr::mutate(
-        final_label = ifelse(is.na(SYMBOL), gene_id, SYMBOL),
-        label_x = pmax(from, pmin(to, ifelse(strand == "+", start, end)))
-      )
-    genes_df$gene_level <- IRanges::disjointBins(
-      IRanges::IRanges(genes_df$start, genes_df$end)
-    )
-
-    tx_keytype <- if ("TXNAME" %in% AnnotationDbi::keytypes(txdb_obj)) {
-      "TXNAME"
-    } else {
-      "TXID"
-    }
-    tx2gene <- AnnotationDbi::select(txdb_obj,
-      keys = AnnotationDbi::keys(txdb_obj, tx_keytype),
-      columns = "GENEID", keytype = tx_keytype
-    )
-    colnames(tx2gene) <- c("tx_id", "gene_id")
-
-    exons_list <- GenomicFeatures::exonsBy(txdb_obj, "tx", use.names = TRUE)
-    exons_gr <- unlist(exons_list)
-    names(exons_gr) <- NULL
-    exons_flat <- as.data.frame(exons_gr)
-    exons_flat$tx_id <- rep(names(exons_list),
-      times = S4Vectors::elementNROWS(exons_list)
-    )
-    exons_joined <- exons_flat %>%
-      dplyr::left_join(tx2gene, by = "tx_id") %>%
-      dplyr::filter(gene_id %in% genes_df$gene_id) %>%
-      dplyr::filter(start < to & end > from)
-
-    if (nrow(exons_joined) > 0) {
-      longest_tx <- exons_joined %>%
-        dplyr::group_by(gene_id, tx_id) %>%
-        dplyr::summarise(len = sum(width), .groups = "drop") %>%
-        dplyr::arrange(desc(len)) %>%
-        dplyr::group_by(gene_id) %>%
-        dplyr::slice(1)
-      feature_df <- exons_joined %>%
-        dplyr::filter(tx_id %in% longest_tx$tx_id) %>%
-        dplyr::left_join(genes_df[, c("gene_id", "gene_level")],
-          by = "gene_id"
-        )
-    }
+    gene_layers <- .prepare_gene_track_data(txdb_obj, org_db_ref, chr, from, to)
+  } else {
+    gene_layers <- list(genes_df = data.frame(), feature_df = data.frame())
   }
 
   list(
     chr = chr, from = from, to = to, text_indent = text_indent,
-    bez_df = bez_df, anchors = anchors, overlap_df_plot = overlap_df_plot,
-    genes_df = genes_df, feature_df = feature_df,
-    plot_ymax = plot_ymax
+    bez_df = loop_layers$bez_df,
+    anchors = loop_layers$anchors,
+    overlap_df_plot = overlap_df_plot,
+    genes_df = gene_layers$genes_df,
+    feature_df = gene_layers$feature_df,
+    plot_ymax = loop_layers$plot_ymax
   )
 }
 

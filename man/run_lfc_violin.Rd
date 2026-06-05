@@ -7,7 +7,7 @@
 run_lfc_violin(
   target_genes,
   global_glist,
-  stat_test = "wilcox.test",
+  stat_test = c("wilcox.test", "t.test"),
   project_name
 )
 }

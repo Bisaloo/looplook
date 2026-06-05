@@ -95,3 +95,255 @@ test_that("consolidate_chromatin_loops respects quiet and write_output flags", {
   expect_false(dir.exists(out_dir))
   expect_false(file.exists(out_file))
 })
+
+# --- cluster_loops_dt: overlap detection (not containment) ---
+test_that("cluster_loops_dt detects overlap not containment", {
+  dt <- data.table::data.table(
+    chr1   = c("chr1", "chr1"),
+    start1 = c(100L, 150L),
+    end1   = c(200L, 250L),
+    chr2   = c("chr1", "chr1"),
+    start2 = c(1000L, 1050L),
+    end2   = c(2000L, 2100L),
+    score  = c(1, 1),
+    source = c(1L, 1L)
+  )
+  result <- looplook:::cluster_loops_dt(dt, gap = 0L)
+  # anchor1 overlaps (100-200 vs 150-250) and anchor2 overlaps (1000-2000 vs 1050-2100)
+  expect_equal(length(unique(result$cluster)), 1L)
+})
+
+# --- reduce_clusters_dt: n_reps excludes NA-score sources ---
+test_that("reduce_clusters_dt excludes NA-score sources from n_reps", {
+  dt <- data.table::data.table(
+    cluster = c(1L, 1L, 1L),
+    chr1 = "chr1", start1 = c(100L, 110L, 120L), end1 = c(200L, 210L, 220L),
+    chr2 = "chr1", start2 = c(1000L, 1010L, 1020L), end2 = c(2000L, 2010L, 2020L),
+    score = c(5, NA, 3),
+    source = c(1L, 1L, 2L)
+  )
+  result <- looplook:::reduce_clusters_dt(dt)
+  # source 1: mean(5, NA→removed)=5; source 2: mean(3)=3
+  # n_reps should be 2 (both have valid scores)
+  expect_equal(result$n_reps, 2L)
+})
+
+# --- bedpe_to_gi: validation and score detection ---
+test_that("bedpe_to_gi rejects start > end", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t200\t100\tchr1\t400\t500", tmp)
+  expect_error(looplook:::bedpe_to_gi(tmp), "start > end")
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi detects score in column 7", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines(c(
+    "chr1\t100\t200\tchr1\t400\t500\t42",
+    "chr1\t150\t250\tchr1\t450\t550\t10"
+  ), tmp)
+  gi <- looplook:::bedpe_to_gi(tmp)
+  expect_equal(S4Vectors::mcols(gi)$score, c(42, 10))
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi warns when no valid score column", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines(c(
+    "chr1\t100\t200\tchr1\t400\t500\tname\tnote",
+    "chr1\t150\t250\tchr1\t450\t550\tname2\tnote2"
+  ), tmp)
+  expect_warning(looplook:::bedpe_to_gi(tmp), "Scores defaulted to 0")
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi swaps anchors when needed", {
+  tmp <- tempfile(fileext = ".bedpe")
+  # chr2 should come before chr1 after swap
+  writeLines("chr2\t100\t200\tchr1\t400\t500", tmp)
+  gi <- looplook:::bedpe_to_gi(tmp)
+  a1 <- InteractionSet::anchors(gi, type = "first")
+  a2 <- InteractionSet::anchors(gi, type = "second")
+  # After swap, first anchor should be chr1
+  expect_equal(as.character(GenomicRanges::seqnames(a1)), "chr1")
+  unlink(tmp)
+})
+
+# --- bedpe_to_gi: score_col parameter ---
+test_that("bedpe_to_gi uses score_col when specified", {
+  tmp <- tempfile(fileext = ".bedpe")
+  # Column 7 is name, column 8 is p-value, column 9 is score
+  writeLines(c(
+    "chr1\t100\t200\tchr1\t400\t500\tname\t0.001\t42",
+    "chr1\t150\t250\tchr1\t450\t550\tname2\t0.01\t10"
+  ), tmp)
+
+  # Auto-detect would pick column 8 (p-value), but explicit score_col=9 picks score
+  gi <- looplook:::bedpe_to_gi(tmp, score_col = 9)
+  expect_equal(S4Vectors::mcols(gi)$score, c(42, 10))
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi errors when score_col exceeds column count", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", tmp)
+  expect_error(looplook:::bedpe_to_gi(tmp, score_col = 10), "exceeds file column count")
+  unlink(tmp)
+})
+
+# --- read_simple_bed: edge cases ---
+test_that("read_simple_bed returns NULL for NULL input", {
+  expect_null(looplook:::read_simple_bed(NULL))
+})
+
+test_that("read_simple_bed errors on missing file", {
+  expect_error(looplook:::read_simple_bed("/nonexistent/file.bed"), "does not exist")
+})
+
+# --- consolidate_chromatin_loops: intersect mode ---
+test_that("consolidate_chromatin_loops intersect mode works", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t110\t210\tchr1\t410\t510", f2)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "intersect",
+    gap = 50,
+    quiet = TRUE
+  )
+  expect_s4_class(gi, "GInteractions")
+  expect_equal(length(gi), 1)
+  unlink(c(f1, f2))
+})
+
+# --- consolidate_chromatin_loops: union mode ---
+test_that("consolidate_chromatin_loops union mode keeps all", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr5\t1000\t2000\tchr5\t4000\t5000", f2)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "union",
+    gap = 100,
+    quiet = TRUE
+  )
+  expect_s4_class(gi, "GInteractions")
+  expect_equal(length(gi), 2) # Different chromosomes, no merge
+  unlink(c(f1, f2))
+})
+
+# --- consolidate_chromatin_loops: blacklist filtering ---
+test_that("consolidate_chromatin_loops filters blacklist", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  bl <- tempfile(fileext = ".bed")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t110\t210\tchr1\t410\t510", f2)
+  # Blacklist overlaps first anchor
+  writeLines("chr1\t90\t210", bl)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "consensus",
+    gap = 50,
+    blacklist_species = bl,
+    quiet = TRUE
+  )
+  # Loop should be filtered out due to blacklist overlap
+  expect_equal(length(gi), 0)
+  unlink(c(f1, f2, bl))
+})
+
+# --- reduce_ginteractions: empty input ---
+test_that("reduce_ginteractions handles empty GInteractions", {
+  empty_gi <- InteractionSet::GInteractions(
+    GenomicRanges::GRanges(),
+    GenomicRanges::GRanges(),
+    mode = "strict"
+  )
+  res <- looplook:::reduce_ginteractions(empty_gi)
+  expect_equal(length(res$gi), 0)
+  expect_equal(length(res$membership), 0)
+})
+
+# --- reduce_ginteractions: basic functionality ---
+test_that("reduce_ginteractions clusters and reduces correctly", {
+  f1 <- tempfile(fileext = ".bedpe")
+  writeLines(c(
+    "chr1\t100\t200\tchr1\t400\t500",
+    "chr1\t110\t210\tchr1\t410\t510"
+  ), f1)
+  gi <- looplook:::bedpe_to_gi(f1)
+  res <- looplook:::reduce_ginteractions(gi, gap = 50)
+  expect_s4_class(res$gi, "GInteractions")
+  expect_equal(length(res$gi), 1) # Should be merged into 1 cluster
+  expect_equal(length(res$membership), 2) # Original 2 loops
+  unlink(f1)
+})
+
+# --- consolidate_chromatin_loops: region_of_interest filtering ---
+test_that("consolidate_chromatin_loops filters by region_of_interest", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  roi <- tempfile(fileext = ".bed")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t110\t210\tchr1\t410\t510", f2)
+  # ROI overlaps the loop
+  writeLines("chr1\t90\t220", roi)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "consensus",
+    gap = 50,
+    region_of_interest = roi,
+    roi_mode = "any", # ROI only covers anchor1, need any-mode
+    quiet = TRUE
+  )
+  expect_s4_class(gi, "GInteractions")
+  expect_equal(length(gi), 1)
+  unlink(c(f1, f2, roi))
+})
+
+test_that("consolidate_chromatin_loops returns empty when no ROI overlap", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  roi <- tempfile(fileext = ".bed")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t110\t210\tchr1\t410\t510", f2)
+  # ROI does NOT overlap
+  writeLines("chr5\t1000000\t2000000", roi)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "consensus",
+    gap = 50,
+    region_of_interest = roi,
+    quiet = TRUE
+  )
+  expect_equal(length(gi), 0)
+  unlink(c(f1, f2, roi))
+})
+
+# --- consolidate_chromatin_loops: write_output ---
+test_that("consolidate_chromatin_loops writes output file", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  out_file <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t110\t210\tchr1\t410\t510", f2)
+
+  gi <- looplook::consolidate_chromatin_loops(
+    files = c(f1, f2),
+    mode = "consensus",
+    gap = 50,
+    out_file = out_file,
+    write_output = TRUE,
+    quiet = TRUE
+  )
+  expect_true(file.exists(out_file))
+  unlink(c(f1, f2, out_file))
+})

@@ -13,7 +13,7 @@ refine_loop_anchors_by_expression(
   species = "hg38",
   out_dir = "./results/filtered",
   project_name = "HiChIP",
-  color_palette = "Set2",
+  color_palette = "Paired",
   karyo_bin_size = 1e+05,
   reclassify_by_expression = TRUE,
   hub_percentile = 0.95,
@@ -28,7 +28,7 @@ refine_loop_anchors_by_expression(
 
 \item{sample_columns}{Character vector or integer indices. Columns in \code{expr_matrix_file} to average. Default: \code{NULL}.}
 
-\item{threshold}{Numeric. Minimum expression (e.g. TPM > 1) for a gene to be considered active. Default: \code{1}.}
+\item{threshold}{Numeric. Minimum expression (e.g. TPM >= 1) for a gene to be considered active. Default: \code{1}.}
 
 \item{unit_type}{Character. Expression unit for plot labels (e.g., \code{"TPM"}). Default: \code{"TPM"}.}
 
@@ -38,7 +38,7 @@ refine_loop_anchors_by_expression(
 
 \item{project_name}{Character. Prefix for output files (automatically appends \code{"_Filtered"}). Default: \code{"HiChIP"}.}
 
-\item{color_palette}{Character. RColorBrewer palette name. Default: \code{"Set2"}.}
+\item{color_palette}{Character. RColorBrewer palette name for loop-type colour assignments. Default: \code{"Paired"}.}
 
 \item{karyo_bin_size}{Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.}
 
@@ -53,30 +53,116 @@ refine_loop_anchors_by_expression(
 \value{
 An invisible named list:
 \itemize{
-\item \code{loop_annotation} — Filtered 3D network with updated \code{loop_type} (e.g., eP-P).
+\item \code{loop_annotation} — Full refined 3D network with updated \code{loop_type}
+(e.g., eP-P) and two target gene columns:
+\itemize{
+\item \code{Active_Target_Genes}: Expression-filtered active-only targets (no fallback).
+\item \code{Putative_Target_Genes}: Display column; may include linear nearest-gene
+fallback when \code{Active_Target_Genes} is empty.
+}
+Refinement status columns:
+\code{Has_Active_Target}, \code{Retained_In_Functional_Network}, and
+\code{Refinement_Action} (\code{"retained_active_target"},
+\code{"reclassified_silent_anchor"}, \code{"expression_filtered_no_active_target"},
+or \code{"structural_only_no_active_target"}).
+All structural loops are preserved; filter on \code{Retained_In_Functional_Network}
+for the high-confidence active subset.
 \item \code{anchor_loci_annotation} — Filtered non-redundant anchor-locus annotations with expressed targets.
 \item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
 \item \code{promoter_centric_stats} — Gene-level connectivity statistics.
 \item \code{distal_element_stats} — Distal-element connectivity statistics.
-\item \code{target_annotation} — External features linked to active loop components.
+\item \code{target_annotation} — Target features (peaks) with gene assignments.
+Key columns include:
+\itemize{
+\item \code{All_Loop_Connected_Genes}: All genes from loop-connected anchors (P/G types).
+\item \code{Regulated_promoter_genes}: Promoter genes supported by loop-anchor context.
+\item \code{Assigned_Target_Genes}: Promoter-first 3D assignment (prioritises P > G > E).
+\item \code{*_Filled} variants: Linear nearest-gene fallback when strict 3D assignments are empty.
+\item \code{Regulated_promoter_Evidence}: Provenance of \code{Regulated_promoter_genes}
+(e.g., \code{local_promoter_overlap}, \code{direct_opposite_promoter}).
+\strong{Read with} \code{Regulated_promoter_genes}; do not cross-reference
+with \code{Assigned_Target_Genes} or other columns.
+\item \code{Regulated_promoter_Fallback_Evidence}: Provenance of
+\code{Regulated_promoter_genes_Filled}.
+\strong{Read with} \code{Regulated_promoter_genes_Filled}; indicates
+which \code{*_Filled} column supplied the fallback gene.
+}
+\item \code{target_gene_links} — Long-format peak-gene provenance table.
+Each row records one peak-gene linkage with full provenance.
+\strong{Read} \code{evidence}, \code{anchor_role}, and \code{gene_role}
+\strong{together as a group} — they jointly describe how each gene was
+assigned to each peak; do not interpret any one column in isolation.
+\itemize{
+\item \code{input_id}, \code{loop_ID}, \code{anchor_id}: Identifiers.
+\item \code{gene}: Linked gene symbol.
+\item \code{gene_role}: \code{"promoter"}, \code{"gene_body"}, or \code{"linear_annotation"}.
+\item \code{source}: \code{"loop_anchor"} (3D-derived) or \code{"linear_annotation"} (nearest gene).
+\item \code{evidence}: Provenance label —
+\code{"local_promoter_overlap"} (peak overlaps anchor promoter),
+\code{"direct_opposite_promoter"} (opposite anchor is promoter),
+\code{"gene_body_context"} (gene body linkage),
+\code{"expanded_promoter_loop"} (via ego-network expansion),
+\code{"linear_annotation"} (direct nearest gene),
+or \code{"linear_fallback"} (filled when 3D assignment was empty).
+\item \code{anchor_role}: \code{"local_anchor"}, \code{"opposite_anchor"},
+\code{"expanded_anchor"}, or \code{"linear_annotation"}.
+\item \code{used_as_fallback}: Logical. \code{TRUE} when this link was added
+via the \code{*_Filled} linear nearest-gene fallback mechanism.
+\item \code{in_regulated_promoter} through \code{in_assigned_target_filled}:
+Logical membership flags indicating which target annotation column(s)
+this gene appears in. A gene may appear in multiple columns simultaneously.
+\item (Refine only) \code{Mean_Expression}: Per-gene mean expression value.
+\item (Refine only) \code{Passes_Expression_Filter}: Logical. \code{TRUE} if
+\code{Mean_Expression >= threshold}.
+}
 \item \code{plots} — Named list of ggplot objects (dumbbell, rose, karyotype).
 \item \code{plot_list} — Backward-compatible alias of \code{plots}.
 }
 If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
+The workbook contains a \emph{Functional Loop Annotation} sheet with only
+loops where \code{Retained_In_Functional_Network == TRUE}.
 }
 \description{
 Integrates quantitative RNA-seq data (e.g., TPM/FPKM) with 3D structural data
-to filter and reclassify regulatory elements, deriving a functionally active
-regulatory network from physical chromatin contacts.
+to reclassify regulatory elements and annotate functional status, deriving a
+functionally interpretable regulatory network from physical chromatin contacts.
+All structural loops are preserved; refinement status columns indicate which
+loops belong to the high-confidence active subset.
 }
 \details{
 \strong{Algorithmic Framework:}
 \itemize{
 \item \strong{Target Filtration:} Parses merged gene assignments (e.g., \code{"GeneA;GeneB"}), evaluates individual genes against a defined expression threshold, and retains only transcriptionally active targets.
 \item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as enhancer-like regulatory elements (\code{eP}, \code{eG}). This adjusts the regulatory syntax to reflect functional states (e.g., reannotating a silent \code{P-P} loop to an \code{eP-P} interaction).
-\item \strong{Structural Hub Preservation:} Inherits foundational 3D Hub classifications (e.g., \code{Is_High_Connectivity_Gene}) derived from the raw physical network. This decouples intrinsic structural network topology from tissue-specific transcriptional activation states.
+\item \strong{Expression-Aware Connectivity Statistics:} Recomputes promoter-centric and distal-element connectivity after expression-aware anchor refinement, while preserving all structural loops in the refined loop annotation. This separates the complete physical contact map from the high-confidence active subset.
 \item \strong{External Target Refinement:} Filters auxiliary target mapping columns (e.g., \code{Assigned_Target_Genes_Filled}) based on expression criteria, ensuring that mapped 1D genomic features are exclusively linked to active genes.
+\item \strong{Target Provenance Preservation:} Recomputes \code{*_Filled}
+membership flags in \code{target_gene_links} after expression filtering,
+retains only links still used by the refined target columns, and appends
+\code{Mean_Expression} plus \code{Passes_Expression_Filter}. Evidence labels
+such as \code{local_promoter_overlap}, \code{direct_opposite_promoter}, and
+\code{linear_fallback} are preserved.
 }
+
+\strong{Design Philosophy:}
+This function does not discard structural loops based on expression state.
+Hi-C, HiChIP, and PLAC-seq capture 3D chromatin contacts; RNA-seq captures
+current transcriptional state. A silent promoter may reflect cell-state,
+time-point, or technical factors rather than absence of physical contact.
+All structural loops are retained with refinement status columns, and a
+high-confidence functional subset is provided via
+\code{Retained_In_Functional_Network} and the \emph{Functional Loop Annotation}
+Excel sheet.
+
+\strong{Interpretation of eP/eG labels:}
+The \code{eP} and \code{eG} labels capture expression-aware enhancer-like
+regulatory states, enabling \code{looplook} to distinguish transcriptionally
+silent reference promoters or gene bodies from putative regulatory anchors in
+3D chromatin space. Orthogonal chromatin evidence, including ATAC-seq
+accessibility, H3K27ac enrichment, or H3K27me3 depletion, can further
+strengthen biological interpretation when available. Users holding matched
+ATAC-seq or ChIP-seq data may overlay eP/eG loci with these tracks to
+confirm residual regulatory activity at transcriptionally silent promoters.
 }
 \examples{
 # 1. Get paths to the required example files in the package
@@ -86,16 +172,12 @@ expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
 # Safely load the pre-computed annotation result from RData
 temp_env <- new.env()
 load(rdata_path, envir = temp_env)
-# Extract the first object found in the RData file
 raw_annotation <- temp_env[[ls(temp_env)[1]]]
 raw_annotation$loop_annotation <- head(raw_annotation$loop_annotation, 6)
 raw_annotation$target_annotation <- head(raw_annotation$target_annotation, 3)
 raw_annotation$promoter_centric_stats <- head(raw_annotation$promoter_centric_stats, 6)
 raw_annotation$distal_element_stats <- head(raw_annotation$distal_element_stats, 6)
 
-# =========================================================================
-# Example : Advanced filtering WITH Transcriptome-Guided Reclassification
-# =========================================================================
 res_reclassified <- refine_loop_anchors_by_expression(
   annotation_res = raw_annotation,
   expr_matrix_file = expr_path,
@@ -109,7 +191,5 @@ res_reclassified <- refine_loop_anchors_by_expression(
   write_output = FALSE,
   quiet = TRUE
 )
-
-# View the biologically corrected loop types (e.g., transition from P-P to eP-P)
 print(table(res_reclassified$loop_annotation$loop_type))
 }

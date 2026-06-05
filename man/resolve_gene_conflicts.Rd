@@ -2,14 +2,16 @@
 % Please edit documentation in R/utils.R
 \name{resolve_gene_conflicts}
 \alias{resolve_gene_conflicts}
-\title{Internal: Resolve Gene Conflicts via Expression & Biotype}
+\title{Internal: Resolve Gene Conflicts via Biotype Priority Then Expression}
 \usage{
 resolve_gene_conflicts(
   current_anno_df,
   txdb_obj,
   org_db_pkg,
   tss_region,
-  gene_expr_map
+  gene_expr_map,
+  min_expr = 0,
+  conflict_strategy = c("biotype_first", "expression_first")
 )
 }
 \arguments{
@@ -25,17 +27,31 @@ definition, e.g. \code{c(-2000, 2000)}.}
 
 \item{gene_expr_map}{Named numeric vector of per-gene expression values,
 or \code{NULL} if unavailable.}
+
+\item{min_expr}{Numeric. Minimum expression value for a gene to be
+considered active during conflict resolution. Default: \code{0}.}
+
+\item{conflict_strategy}{Character. Conflict resolution order.
+\code{"biotype_first"} (default): select the best biotype tier first,
+then apply expression filtering within that tier. This is the more
+conservative default — a silent protein-coding gene is preferred over
+a highly expressed lncRNA at the same locus.
+\code{"expression_first"}: apply expression filtering across all
+biotypes first, then pick the best biotype among expressed candidates.}
 }
 \value{
 The input data frame with \code{SYMBOL} and \code{annotation}
 columns resolved.
 }
 \description{
-For each genomic range in an annotation data frame, identifies all genes
-whose promoters overlap the range, then selects the best candidate using
-expression level and biotype priority (protein-coding > small-ncRNA
-(miRNA, snoRNA, snRNA, rRNA, scaRNA) > antisense > lncRNA/ncRNA >
-pseudogene). When multiple genes have similar expression, all are retained
-(collapsed with ";").
+For each genomic range, identifies all promoter-overlapping genes,
+resolves conflicts using a two-stage strategy: (1) biotype priority
+(protein-coding > small-ncRNA > antisense > lncRNA/ncRNA > pseudogene),
+then (2) expression-aware filtering within the selected biotype tier.
+If any gene in the best tier is expressed (\code{tpm >= min_expr}), only
+expressed candidates are retained; otherwise all candidates in that tier
+are kept. When multiple candidates share the same biotype rank, a
+co-dominant expression rule is applied: all genes with expression >= 10\\%
+of the group maximum are retained (collapsed with ";").
 }
 \keyword{internal}

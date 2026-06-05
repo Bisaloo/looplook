@@ -19,6 +19,8 @@ annotate_peaks_and_loops(
   karyo_bin_size = 1e+05,
   neighbor_hop = 0,
   hub_percentile = 0.95,
+  min_expr = 0,
+  conflict_strategy = c("biotype_first", "expression_first"),
   write_output = TRUE,
   quiet = FALSE
 )
@@ -52,6 +54,19 @@ annotate_peaks_and_loops(
 
 \item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
 
+\item{min_expr}{Numeric. Minimum expression value for a gene to be considered
+active during anchor-level conflict resolution. Used only when
+\code{expr_matrix_file} is provided. Default: \code{0} (any detectable
+expression qualifies). Increase to \code{1} or higher to require stronger
+evidence. See \code{\link{refine_loop_anchors_by_expression}} for the
+separate \code{threshold} parameter that controls promoter reclassification.}
+
+\item{conflict_strategy}{Character. Conflict resolution order for
+overlapping gene assignments. \code{"biotype_first"} (default): select
+the best biotype tier first, then apply expression filtering within that
+tier. \code{"expression_first"}: apply expression filtering across all
+biotypes first, then pick the best biotype among expressed candidates.}
+
 \item{write_output}{Logical. If \code{TRUE} (default), write the Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
 
 \item{quiet}{Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.}
@@ -59,7 +74,47 @@ annotate_peaks_and_loops(
 \value{
 An invisible named list:
 \itemize{
-\item \code{target_annotation} — Peak-to-gene assignments with \code{Assigned_Target_Genes_Filled} (3D-prioritised, falling back to nearest gene).
+\item \code{target_annotation} — Target features (peaks) with gene assignments.
+Key columns include:
+\itemize{
+\item \code{All_Loop_Connected_Genes}: All genes from loop-connected anchors (P/G types).
+\item \code{Regulated_promoter_genes}: Promoter genes supported by loop-anchor context.
+\item \code{Assigned_Target_Genes}: Promoter-first 3D assignment (prioritises P > G > E).
+\item \code{*_Filled} variants: Linear nearest-gene fallback when strict 3D assignments are empty.
+\item \code{Regulated_promoter_Evidence}: Provenance of \code{Regulated_promoter_genes}
+(e.g., \code{local_promoter_overlap}, \code{direct_opposite_promoter}).
+\strong{Read with} \code{Regulated_promoter_genes}; do not cross-reference
+with \code{Assigned_Target_Genes} or other columns.
+\item \code{Regulated_promoter_Fallback_Evidence}: Provenance of
+\code{Regulated_promoter_genes_Filled}.
+\strong{Read with} \code{Regulated_promoter_genes_Filled}; indicates
+which \code{*_Filled} column supplied the fallback gene.
+}
+\item \code{target_gene_links} — Long-format peak-gene provenance table.
+Each row records one peak-gene linkage with full provenance.
+\strong{Read} \code{evidence}, \code{anchor_role}, and \code{gene_role}
+\strong{together as a group} — they jointly describe how each gene was
+assigned to each peak; do not interpret any one column in isolation.
+\itemize{
+\item \code{input_id}, \code{loop_ID}, \code{anchor_id}: Identifiers.
+\item \code{gene}: Linked gene symbol.
+\item \code{gene_role}: \code{"promoter"}, \code{"gene_body"}, or \code{"linear_annotation"}.
+\item \code{source}: \code{"loop_anchor"} (3D-derived) or \code{"linear_annotation"} (nearest gene).
+\item \code{evidence}: Provenance label —
+\code{"local_promoter_overlap"} (peak overlaps anchor promoter),
+\code{"direct_opposite_promoter"} (opposite anchor is promoter),
+\code{"gene_body_context"} (gene body linkage),
+\code{"expanded_promoter_loop"} (via ego-network expansion),
+\code{"linear_annotation"} (direct nearest gene),
+or \code{"linear_fallback"} (filled when 3D assignment was empty).
+\item \code{anchor_role}: \code{"local_anchor"}, \code{"opposite_anchor"},
+\code{"expanded_anchor"}, or \code{"linear_annotation"}.
+\item \code{used_as_fallback}: Logical. \code{TRUE} when this link was added
+via the \code{*_Filled} linear nearest-gene fallback mechanism.
+\item \code{in_regulated_promoter} through \code{in_assigned_target_filled}:
+Logical membership flags indicating which target annotation column(s)
+this gene appears in.
+}
 \item \code{loop_annotation} — Annotated 3D interactome with \code{Putative_Target_Genes}.
 \item \code{anchor_loci_annotation} — Non-redundant anchor-locus genomic classifications after within-cluster interval reduction.
 \item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
@@ -79,14 +134,21 @@ A dual-purpose analytical framework designed to integrate 1D genomic features wi
 }
 \details{
 \strong{Mapping Strategy and Fallback Mechanism}
-The method prioritizes physical 3D chromatin contacts. If a genomic feature overlaps an anchor looping to a distal gene, the distal gene is assigned as the target. In the absence of spatial loop evidence, the function implements a linear proximity-based fallback to assign the nearest active local gene, ensuring continuous annotation coverage.
+The method prioritizes physical 3D chromatin contacts while keeping strict
+and fallback semantics separate. \code{Regulated_promoter_genes} reports
+promoter genes supported by loop-anchor context, \code{Assigned_Target_Genes}
+preserves the historical promoter-first 3D assignment, and \code{*_Filled}
+columns add a linear nearest-gene fallback only when strict 3D assignments are
+empty. \code{Regulated_promoter_Evidence},
+\code{Regulated_promoter_Fallback_Evidence}, and \code{target_gene_links}
+provide row-level provenance for these decisions.
 
 \strong{Hierarchical Conflict Resolution}
 To address complex loci where a single anchor overlaps multiple promoters (e.g., dense gene clusters or bidirectional promoters), the function executes a 3-step resolution:
 \enumerate{
-\item \emph{Expression Filter:} Excludes transcriptionally silent genes using a user-provided expression matrix.
-\item \emph{Biotype Prioritization:} Ranks remaining candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
-\item \emph{Expression Tiebreaker:} Resolves remaining ambiguities by designating the gene with the highest transcriptional abundance as the primary target.
+\item \emph{Biotype Prioritization:} Selects the highest-priority candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
+\item \emph{Expression Filter:} Within the selected biotype tier, excludes transcriptionally silent genes using a user-provided expression matrix. If no gene in the tier is expressed, all candidates in that tier are retained.
+\item \emph{Expression Tiebreaker:} Among remaining candidates of equal biotype priority, retains all genes whose expression is within one order of magnitude of the highest-expressing candidate (i.e., expression >= 10\\% of the group maximum). This co-dominant rule preserves functionally redundant candidates such as bidirectional promoter pairs.
 }
 
 \strong{Network Topology Analysis}

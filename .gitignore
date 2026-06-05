@@ -13,8 +13,11 @@ looplook.Rproj
 *.tar.gz
 looplook_results/
 tests/testthat/Rplots.pdf
+Rplots.pdf
 .Rproj.user/
 Meta/
 pkgdown/
 tests/testthat/_problems/
 tests/testthat/testthat-problems.rds
+coverage-report.html
+lib/

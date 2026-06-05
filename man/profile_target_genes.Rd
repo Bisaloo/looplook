@@ -87,7 +87,14 @@ profile_target_genes(
 \item{cor_method}{Character. Method for sample correlation matrices.}
 }
 \value{
-An invisible nested list containing interactive plot objects, GO results, and gene sets.
+An invisible nested list indexed by \code{target_source} (e.g., \code{"targets"}, \code{"loops"}).
+Each element contains:
+\describe{
+\item{\code{go_results}}{Data frame of GO enrichment results (if \code{run_go = TRUE}).}
+\item{\code{target_gene_sets}}{Named list of character vectors containing target gene symbols.}
+\item{\code{plots}}{Named list of ggplot objects (LFC_Violin, GSEA, Heatmap, Scatter, GO_Network, PPI_Network, etc.).}
+\item{\code{warnings}}{Character vector of warnings encountered during analysis.}
+}
 }
 \description{
 Integrates 3D genomic interaction data (e.g., Hi-C, HiChIP) with transcriptomic
@@ -97,11 +104,22 @@ transcription factor motif scanning, Gene Ontology (GO) enrichment, and
 protein-protein interaction (PPI) network construction.
 }
 \details{
-Two analysis steps use R's random number generator: GSEA target-gene down-sampling
-(controlled by \code{gsea_nSample}) and motif background anchor sampling (class-matched,
-limited to 2 000 background regions per contrast). For fully reproducible results, call \code{set.seed()}
+Two analysis steps use random sampling: GSEA target-gene down-sampling
+(controlled by \code{gsea_nSample}, via unweighted sampling without
+replacement to avoid enrichment bias) and motif background anchor sampling
+(GC-matched, limited to 2 000 background regions per contrast).
+GSEA tie-breaking for duplicate ranked values is deterministic
+(position-based offset). For fully reproducible results, call \code{set.seed()}
 before running this function. The \code{clusterProfiler::GSEA} call internally
 uses \code{seed = TRUE} and is not affected by the global RNG state.
+}
+\note{
+If any downstream analysis module fails (e.g. due to missing optional
+packages or network timeouts), the error propagates and stops the entire
+function. To obtain partial results when some modules are unavailable,
+disable problematic steps via \code{run_go = FALSE}, \code{run_ppi = FALSE},
+or \code{run_motif = FALSE}, or call the corresponding internal functions
+individually.
 }
 \examples{
 rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")

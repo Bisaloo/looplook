@@ -9,13 +9,13 @@ test_that("Module 5: IGV-Style Track Visualization generates plot successfully",
   )
 
   track_plot <- looplook::plot_peaks_interactions(
-      bedpe_file = f1,
-      chr = "chr1",
-      from = 90,
-      to = 450,
-      score_to_alpha = TRUE,
-      show_gene_track = FALSE
-    )
+    bedpe_file = f1,
+    chr = "chr1",
+    from = 90,
+    to = 450,
+    score_to_alpha = TRUE,
+    show_gene_track = FALSE
+  )
 
   expect_s3_class(track_plot, "ggplot")
 })
@@ -33,20 +33,20 @@ test_that("prepare_track_data stacks overlapping arcs within max_levels", {
   )
 
   d <- looplook:::prepare_track_data(
-      bedpe_file = bedpe_path,
-      target_bed = NULL,
-      chr = "chr1",
-      from = 90,
-      to = 450,
-      species = "hg38",
-      max_levels = 2,
-      base_anchor_height = 0.05,
-      loop_color = "#5D6D7E",
-      anchor_color = "#3498DB",
-      score_to_alpha = FALSE,
-      min_score = NULL,
-      show_gene_track = FALSE
-    )
+    bedpe_file = bedpe_path,
+    target_bed = NULL,
+    chr = "chr1",
+    from = 90,
+    to = 450,
+    species = "hg38",
+    max_levels = 2,
+    base_anchor_height = 0.05,
+    loop_color = "#5D6D7E",
+    anchor_color = "#3498DB",
+    score_to_alpha = FALSE,
+    min_score = NULL,
+    show_gene_track = FALSE
+  )
 
   expect_gt(nrow(d$bez_df), 0)
 
@@ -95,4 +95,119 @@ test_that("draw_upset_intersections returns grob and handles empty input", {
       "Empty"
     )
   )
+})
+
+test_that("draw_upset_intersections with single list returns NULL", {
+  expect_message(
+    g <- looplook:::draw_upset_intersections(list(A = c("X", "Y")), "Single"),
+    "Less than 2"
+  )
+  expect_null(g)
+})
+
+test_that("plot_peaks_interactions with score column", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("ggforce")
+  skip_if_not_installed("ggrepel")
+
+  f1 <- tempfile(fileext = ".bedpe")
+  writeLines(
+    c(
+      "chr1\t100\t140\tchr1\t400\t440\t10",
+      "chr1\t150\t190\tchr1\t350\t390\t20"
+    ),
+    con = f1
+  )
+
+  p <- looplook::plot_peaks_interactions(
+    bedpe_file = f1,
+    chr = "chr1",
+    from = 90,
+    to = 450,
+    score_to_alpha = TRUE,
+    show_gene_track = FALSE
+  )
+  expect_s3_class(p, "ggplot")
+  unlink(f1)
+})
+
+test_that("plot_peaks_interactions with target_bed overlay", {
+  skip_if_not_installed("ggplot2")
+  skip_if_not_installed("ggforce")
+  skip_if_not_installed("ggrepel")
+
+  bedpe <- tempfile(fileext = ".bedpe")
+  bed <- tempfile(fileext = ".bed")
+  writeLines("chr1\t100\t140\tchr1\t400\t440", bedpe)
+  writeLines("chr1\t110\t130", bed)
+
+  p <- looplook::plot_peaks_interactions(
+    bedpe_file = bedpe,
+    target_bed = bed,
+    chr = "chr1",
+    from = 90,
+    to = 450,
+    show_gene_track = FALSE
+  )
+  expect_s3_class(p, "ggplot")
+  unlink(c(bedpe, bed))
+})
+
+test_that("prepare_track_data with min_score filter", {
+  bedpe_path <- tempfile(fileext = ".bedpe")
+  writeLines(
+    c(
+      "chr1\t100\t140\tchr1\t400\t440\t5",
+      "chr1\t150\t190\tchr1\t350\t390\t50"
+    ),
+    bedpe_path
+  )
+
+  d <- looplook:::prepare_track_data(
+    bedpe_file = bedpe_path,
+    target_bed = NULL,
+    chr = "chr1",
+    from = 90,
+    to = 450,
+    species = "hg38",
+    max_levels = 10,
+    base_anchor_height = 0.05,
+    loop_color = "#5D6D7E",
+    anchor_color = "#3498DB",
+    score_to_alpha = FALSE,
+    min_score = 10,
+    show_gene_track = FALSE
+  )
+  # Only the loop with score >= 10 should remain
+  expect_equal(length(unique(d$bez_df$loop_i)), 1)
+  unlink(bedpe_path)
+})
+
+test_that("prepare_track_data infers chr when NULL", {
+  bedpe_path <- tempfile(fileext = ".bedpe")
+  writeLines(
+    c(
+      "chr5\t100\t140\tchr5\t400\t440",
+      "chr5\t150\t190\tchr5\t350\t390"
+    ),
+    bedpe_path
+  )
+
+  d <- looplook:::prepare_track_data(
+    bedpe_file = bedpe_path,
+    target_bed = NULL,
+    chr = NULL, # Should infer chr5
+    from = NULL,
+    to = NULL,
+    species = "hg38",
+    max_levels = 10,
+    base_anchor_height = 0.05,
+    loop_color = "#5D6D7E",
+    anchor_color = "#3498DB",
+    score_to_alpha = FALSE,
+    min_score = NULL,
+    show_gene_track = FALSE
+  )
+  expect_equal(d$chr, "chr5")
+  unlink(bedpe_path)
 })

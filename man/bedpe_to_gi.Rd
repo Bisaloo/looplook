@@ -4,11 +4,22 @@
 \alias{bedpe_to_gi}
 \title{Read BEDPE File into a GInteractions Object}
 \usage{
-bedpe_to_gi(bedpe_file)
+bedpe_to_gi(bedpe_file, score_col = NULL)
 }
 \arguments{
 \item{bedpe_file}{Character. Path to a BEDPE file. Must contain at least six columns:
 \code{chr1, start1, end1, chr2, start2, end2}.}
+
+\item{score_col}{Integer or \code{NULL}. Column index to use as interaction
+score (e.g. PET count, -log10(p-value)). If \code{NULL} (default), column 8
+is tried first, then column 7; if neither is numeric, scores default to 0.
+Set explicitly when the score column position differs from the standard or
+when auto-detection picks the wrong column. Note: downstream filtering
+parameters such as \code{min_score} in
+\code{\link{consolidate_chromatin_loops}} assume \emph{higher scores = better
+interactions}. If your score column contains p-values or other metrics where
+\emph{smaller is better}, convert it first (e.g. \code{-log10(p)}) or filter
+manually after consolidation.}
 }
 \value{
 A \code{\link[InteractionSet]{GInteractions}} object with a \code{score} metadata column

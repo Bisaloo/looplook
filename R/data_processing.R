@@ -16,6 +16,16 @@
 #'
 #' @param bedpe_file Character. Path to a BEDPE file. Must contain at least six columns:
 #'   \code{chr1, start1, end1, chr2, start2, end2}.
+#' @param score_col Integer or \code{NULL}. Column index to use as interaction
+#'   score (e.g. PET count, -log10(p-value)). If \code{NULL} (default), column 8
+#'   is tried first, then column 7; if neither is numeric, scores default to 0.
+#'   Set explicitly when the score column position differs from the standard or
+#'   when auto-detection picks the wrong column. Note: downstream filtering
+#'   parameters such as \code{min_score} in
+#'   \code{\link{consolidate_chromatin_loops}} assume \emph{higher scores = better
+#'   interactions}. If your score column contains p-values or other metrics where
+#'   \emph{smaller is better}, convert it first (e.g. \code{-log10(p)}) or filter
+#'   manually after consolidation.
 #' @return A \code{\link[InteractionSet]{GInteractions}} object with a \code{score} metadata column
 #'   (defaulting to 0 if not provided).
 #' @importFrom data.table fread
@@ -37,7 +47,7 @@
 #'
 #' # Check the imported score column
 #' S4Vectors::mcols(gi)$score
-bedpe_to_gi <- function(bedpe_file) {
+bedpe_to_gi <- function(bedpe_file, score_col = NULL) {
   if (is.null(bedpe_file) || !file.exists(bedpe_file)) {
     stop("BEDPE file does not exist or path is invalid: ", bedpe_file)
   }
@@ -45,6 +55,18 @@ bedpe_to_gi <- function(bedpe_file) {
 
   if (ncol(df) < 6) {
     stop("BEDPE file must have at least 6 columns: ", bedpe_file)
+  }
+
+  # Convert coordinate columns to numeric before validation
+  coord_cols <- c(2, 3, 5, 6)
+  for (cc in coord_cols) {
+    df[[cc]] <- suppressWarnings(as.numeric(df[[cc]]))
+  }
+  if (any(is.na(df[, ..coord_cols]))) {
+    stop("BEDPE file contains non-numeric coordinate columns: ", bedpe_file)
+  }
+  if (any(df[[2]] > df[[3]], na.rm = TRUE) || any(df[[5]] > df[[6]], na.rm = TRUE)) {
+    stop("BEDPE file contains rows with start > end coordinate: ", bedpe_file)
   }
 
   df <- as.data.frame(df)
@@ -66,25 +88,41 @@ bedpe_to_gi <- function(bedpe_file) {
     InteractionSet::GInteractions(gr1, gr2, mode = "strict")
   )
 
+  .numeric_ratio <- function(x) {
+    x <- as.character(x)
+    x <- x[!is.na(x) & trimws(x) != ""]
+    if (length(x) == 0) {
+      return(0)
+    }
+    mean(!is.na(suppressWarnings(as.numeric(x))))
+  }
+
   final_scores <- rep(0, nrow(df))
   found <- FALSE
 
-  if (ncol(df) >= 8) {
-    v8 <- as.numeric(df[, 8])
-    if (sum(!is.na(v8)) > (nrow(df) * 0.5)) {
-      final_scores <- v8
+  if (!is.null(score_col)) {
+    if (!is.numeric(score_col) || length(score_col) != 1L ||
+        is.na(score_col) || score_col < 1 ||
+        score_col != as.integer(score_col)) {
+      stop("score_col must be a single positive integer column index.", call. = FALSE)
+    }
+    if (score_col > ncol(df)) {
+      stop("score_col = ", score_col, " exceeds file column count (", ncol(df), ")")
+    }
+    final_scores <- as.numeric(df[[score_col]])
+    found <- TRUE
+  } else {
+    if (ncol(df) >= 8 && .numeric_ratio(df[[8]]) >= 0.5) {
+      final_scores <- suppressWarnings(as.numeric(df[[8]]))
       found <- TRUE
     }
-  }
-  if (!found && ncol(df) >= 7) {
-    v7 <- as.numeric(df[, 7])
-    if (sum(!is.na(v7)) > (nrow(df) * 0.5)) {
-      final_scores <- v7
+    if (!found && ncol(df) >= 7 && .numeric_ratio(df[[7]]) >= 0.5) {
+      final_scores <- suppressWarnings(as.numeric(df[[7]]))
       found <- TRUE
     }
-  }
-  if (!found && ncol(df) >= 7) {
-    warning("Scores defaulted to 0: no column beyond 6 had >50% numeric values")
+    if (!found && ncol(df) >= 7) {
+      warning("Scores defaulted to 0: no column beyond 6 had >50% numeric values")
+    }
   }
 
   final_scores[is.na(final_scores)] <- 0
@@ -168,9 +206,27 @@ read_simple_bed <- function(bed_file) {
   }
 
   df <- data.table::fread(bed_file, header = FALSE, select = c(1, 2, 3))
+  # Auto-detect header: only examine the first row to avoid misidentifying
+  # a malformed data row as a header line.
+  has_header <- nrow(df) > 0 && (
+    is.na(suppressWarnings(as.numeric(df[[2]][1]))) ||
+    is.na(suppressWarnings(as.numeric(df[[3]][1]))))
+  if (has_header) {
+    df <- data.table::fread(bed_file, header = FALSE, select = c(1, 2, 3), skip = 1)
+  }
+  # Validate all coordinate columns are numeric after header handling
+  df[[2]] <- suppressWarnings(as.numeric(df[[2]]))
+  df[[3]] <- suppressWarnings(as.numeric(df[[3]]))
+  if (any(is.na(df[[2]]) | is.na(df[[3]]))) {
+    stop("BED file contains non-numeric start/end coordinates after header handling.",
+      call. = FALSE)
+  }
+  if (nrow(df) > 0 && any(df[[2]] > df[[3]], na.rm = TRUE)) {
+    stop("BED file contains intervals with start > end.", call. = FALSE)
+  }
   # BED is 0-based half-open; GRanges expects 1-based closed
   .with_known_upstream_noise_suppressed(
-    GenomicRanges::GRanges(df$V1, IRanges::IRanges(df$V2 + 1, df$V3))
+    GenomicRanges::GRanges(df[[1]], IRanges::IRanges(df[[2]] + 1, df[[3]]))
   )
 }
 
@@ -191,6 +247,11 @@ read_simple_bed <- function(bed_file) {
 #'   \item \code{"union"}: Retains all chromatin interactions across the entire cohort, ideal for exploratory pan-tissue analyses.
 #' }
 #'
+#' \strong{Connected-component chaining}: Graph-based clustering may
+#' transitively chain loci (A–B and B–C merge, pulling A and C into the same
+#' cluster even if they are far apart). Inspect \code{n_members} in the
+#' output and reduce \code{gap} if clusters appear inflated.
+#'
 #' It also supports a \strong{two-stage filtering strategy} to maximize signal-to-noise ratio:
 #' \itemize{
 #'   \item \strong{Pre-filtering} (\code{min_raw_score}): Removes low-confidence noise (e.g., singleton reads) from raw files \emph{before} merging.
@@ -210,9 +271,9 @@ read_simple_bed <- function(bed_file) {
 #'   (only effective when \code{mode = "consensus"}).
 #'   If \code{NULL} (default), the threshold is automatically calculated:
 #'   \itemize{
-#'     \item For 2 replicates: Requires both (2/2).
-#'     \item For >2 replicates: Requires strict majority (>75\% support).
-#'     \item (e.g., 3 for N=3, 4 for N=4, 4 for N=5).
+#'     \item For 2–3 replicates: Requires all (100\%).
+#'     \item For \eqn{N \ge 4}: Requires \eqn{\lfloor 0.75N \rfloor + 1}
+#'       (e.g., 3 for N=4, 4 for N=5, 7 for N=8).
 #'   }
 #' @param min_raw_score Numeric. \strong{Pre-filtering threshold}. Loops with a raw score (e.g., read count) below this value in individual files will be discarded \strong{before} any merging or intersection.
 #'   \itemize{
@@ -225,13 +286,30 @@ read_simple_bed <- function(bed_file) {
 #'     \item For \code{"intersect"} mode, this filters the retained File 1 loops by their original score.
 #'     \item Default: \code{NULL} (no post-filtering).
 #'   }
+#' @param score_col Integer or \code{NULL}. Column index to use as interaction
+#'   score when reading BEDPE files. Passed to \code{\link{bedpe_to_gi}}.
+#'   If \code{NULL} (default), auto-detection is used (see \code{\link{bedpe_to_gi}}).
 #' @param blacklist_species Character. Species/build for built-in blacklist
 #'   (e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.
-#' @param region_of_interest Character. Path to BED file. Only loops overlapping these regions will be kept.
+#' @param region_of_interest Character. Path to BED file defining regions of interest (ROI). Only loops overlapping these regions will be kept.
+#' @param roi_mode Character. How loops must overlap \code{region_of_interest}.
+#'   \code{"any"} (default): keep loops where \emph{either} anchor overlaps the ROI
+#'   (suitable for promoter-centric or enhancer-gene queries).
+#'   \code{"both"}: keep loops where \emph{both} anchors overlap the ROI
+#'   (suitable for TAD confinement or domain-internal interaction queries).
 #' @param out_file Character. The file name (including the file path) for saving results in the extended BEDPE format.
 #' @param write_output Logical. If \code{TRUE} (default), write the consolidated BEDPE file when \code{out_file} is provided. If \code{FALSE}, return the \code{GInteractions} object without creating directories or files.
 #' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
-#' @return A filtered \code{\link[InteractionSet]{GInteractions}} object.
+#' @return A filtered \code{\link[InteractionSet]{GInteractions}} object with metadata columns:
+#'   \describe{
+#'     \item{\code{score}}{Replicate-balanced consensus score.}
+#'     \item{\code{n_members}}{Number of raw loops merged into this entry
+#'       (1 for intersect mode where no coordinate merging occurs).}
+#'     \item{\code{n_reps}}{Number of input files that support this entry.}
+#'   }
+#'   When \code{write_output = TRUE} and \code{out_file} is provided, an extended
+#'   BEDPE file is written with the additional columns \code{n_members} and
+#'   \code{n_reps} appended after the standard BEDPE fields.
 #' @importFrom data.table fread
 #' @importFrom GenomicRanges GRanges seqnames start end
 #' @importFrom IRanges IRanges
@@ -292,10 +370,12 @@ consolidate_chromatin_loops <- function(
   gap = 1000,
   mode = c("consensus", "intersect", "union"),
   min_consensus = NULL,
+  score_col = NULL,
   min_raw_score = NULL,
   min_score = NULL,
   blacklist_species = NULL,
   region_of_interest = NULL,
+  roi_mode = c("any", "both"),
   out_file = NULL,
   write_output = TRUE,
   quiet = FALSE
@@ -304,14 +384,21 @@ consolidate_chromatin_loops <- function(
     if (!quiet) message(...)
   }
 
-  stopifnot(length(files) >= 2)
+  if (is.null(files) || length(files) < 2) {
+    stop("`files` must contain at least two BEDPE file paths.", call. = FALSE)
+  }
+  missing_files <- files[!file.exists(files)]
+  if (length(missing_files) > 0) {
+    stop("BEDPE files not found: ", paste(missing_files, collapse = ", "), call. = FALSE)
+  }
   mode <- match.arg(mode)
+  roi_mode <- match.arg(roi_mode)
   n_reps <- length(files)
 
   log_message(">>> Reading BEDPE files")
 
   gi_list <- lapply(files, function(f) {
-    gi <- bedpe_to_gi(f)
+    gi <- bedpe_to_gi(f, score_col = score_col)
 
     if (!is.null(min_raw_score)) {
       if ("score" %in% colnames(S4Vectors::mcols(gi))) {
@@ -352,10 +439,8 @@ consolidate_chromatin_loops <- function(
 
     result_gi <- current_gi
     S4Vectors::mcols(result_gi)$n_reps <- n_reps
-    S4Vectors::mcols(result_gi)$n_members <- n_reps
-
+    S4Vectors::mcols(result_gi)$n_members <- 1L
   } else {
-
     log_message(">>> Clustering mode (Union/Consensus): Merging coordinates via Graph")
 
     combined_dt <- data.table::rbindlist(lapply(gi_list, gi_to_dt))
@@ -367,6 +452,10 @@ consolidate_chromatin_loops <- function(
       if (is.null(min_consensus)) {
         if (n_reps == 2) {
           min_consensus <- 2
+        } else if (n_reps == 3) {
+          min_consensus <- 3
+        } else if (n_reps == 4) {
+          min_consensus <- 3
         } else {
           min_consensus <- floor(0.75 * n_reps) + 1
         }
@@ -403,6 +492,7 @@ consolidate_chromatin_loops <- function(
     if (file.exists(blacklist_path)) {
       log_message(">>> Filtering blacklist: ", basename(blacklist_path))
       bl <- read_simple_bed(blacklist_path)
+      bl <- .harmonize_seqlevels(bl, InteractionSet::anchors(result_gi, "first"), "blacklist")
       h1 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "first"), bl)
       h2 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "second"), bl)
       bad <- unique(c(S4Vectors::queryHits(h1), S4Vectors::queryHits(h2)))
@@ -413,14 +503,19 @@ consolidate_chromatin_loops <- function(
   }
 
   if (!is.null(region_of_interest)) {
-    log_message(">>> Filtering by region of interest: ", basename(region_of_interest))
+    log_message(">>> Filtering by region of interest (", roi_mode, "): ", basename(region_of_interest))
     if (file.exists(region_of_interest)) {
       tg <- read_simple_bed(region_of_interest)
+      tg <- .harmonize_seqlevels(tg, InteractionSet::anchors(result_gi, "first"), "ROI")
 
       h1 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "first"), tg)
       h2 <- InteractionSet::findOverlaps(InteractionSet::anchors(result_gi, "second"), tg)
 
-      keep <- unique(c(S4Vectors::queryHits(h1), S4Vectors::queryHits(h2)))
+      keep <- if (roi_mode == "any") {
+        base::union(S4Vectors::queryHits(h1), S4Vectors::queryHits(h2))
+      } else {
+        base::intersect(S4Vectors::queryHits(h1), S4Vectors::queryHits(h2))
+      }
 
       if (length(keep) > 0) {
         result_gi <- result_gi[keep]
@@ -440,20 +535,23 @@ consolidate_chromatin_loops <- function(
 
     # BEDPE export: convert back from 1-based closed to 0-based half-open
     out_df <- data.frame(
-      chr1 = GenomicRanges::seqnames(a1),
+      chr1 = as.character(GenomicRanges::seqnames(a1)),
       start1 = GenomicRanges::start(a1) - 1L,
       end1 = GenomicRanges::end(a1),
-      chr2 = GenomicRanges::seqnames(a2),
+      chr2 = as.character(GenomicRanges::seqnames(a2)),
       start2 = GenomicRanges::start(a2) - 1L,
       end2 = GenomicRanges::end(a2),
       name = ".",
       score = round(S4Vectors::mcols(result_gi)$score, 2),
       n_members = if (!is.null(S4Vectors::mcols(result_gi)$n_members)) {
         S4Vectors::mcols(result_gi)$n_members
-      } else if (!is.null(S4Vectors::mcols(result_gi)$n_reps)) {
+      } else {
+        rep(1L, length(result_gi))
+      },
+      n_reps = if (!is.null(S4Vectors::mcols(result_gi)$n_reps)) {
         S4Vectors::mcols(result_gi)$n_reps
       } else {
-        1
+        rep(1L, length(result_gi))
       },
       stringsAsFactors = FALSE
     )
@@ -510,7 +608,7 @@ reduce_clusters_dt <- function(dt) {
 
   cluster_scores <- dt[, .(
     score = .mean_or_na(score)
-  ), by = .(cluster, source)][, .(
+  ), by = .(cluster, source)][!is.na(score), .(
     score = .mean_or_na(score),
     n_reps = .N
   ), by = cluster]
@@ -562,19 +660,19 @@ dt_to_gi <- function(dt) {
 cluster_loops_dt <- function(dt, gap) {
   dt[, idx := .I]
   dt[, `:=`(
-    a1_l = start1 - gap,
-    a1_r = end1 + gap,
-    a2_l = start2 - gap,
-    a2_r = end2 + gap
+    a1_l = start1 - gap - 1L,
+    a1_r = end1 + gap + 1L,
+    a2_l = start2 - gap - 1L,
+    a2_r = end2 + gap + 1L
   )]
 
   hits <- dt[dt, on = .(
     chr1 = chr1,
-    a1_l <= start1,
-    a1_r >= end1,
+    a1_l <= end1,
+    a1_r >= start1,
     chr2 = chr2,
-    a2_l <= start2,
-    a2_r >= end2
+    a2_l <= end2,
+    a2_r >= start2
   ), nomatch = NULL, allow.cartesian = TRUE]
 
   edges <- hits[idx < i.idx, .(from = idx, to = i.idx)]
@@ -596,6 +694,6 @@ if (getRversion() >= "2.15.1") {
     "V1", "V2", "V3", "V4", "V5", "V6", "V7",
     "chr1", "start1", "end1", "chr2", "start2", "end2",
     "idx", "i.idx", "cluster", "score", "source", "n_members", "n_reps",
-    "a1_l", "a1_r", "a2_l", "a2_r", ".N", ".I"
+    "a1_l", "a1_r", "a2_l", "a2_r", ".N", ".I", "..coord_cols"
   ))
 }

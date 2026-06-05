@@ -1,6 +1,24 @@
 # tests/testthat/test-simulation.R — synthetic data covering all code paths
 
 # ════════════════════════════════════════════════════════════════════════════
+# Shared fixtures: cache TxDb / OrgDb once for all integration tests
+# ════════════════════════════════════════════════════════════════════════════
+sim_txdb <- NULL
+sim_org_db <- NULL
+sim_has_bioc <- requireNamespace("org.Hs.eg.db", quietly = TRUE) &&
+  requireNamespace("GenomicFeatures", quietly = TRUE)
+
+if (sim_has_bioc) {
+  sim_txdb <- tryCatch(
+    AnnotationDbi::loadDb(
+      system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
+    ),
+    error = function(e) NULL
+  )
+  sim_org_db <- "org.Hs.eg.db"
+}
+
+# ════════════════════════════════════════════════════════════════════════════
 # Part A: Unit-level tests with pure mock data (no TxDb / OrgDb required)
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -80,7 +98,77 @@ test_that("extract_target_gene_sets: source branching", {
 
   # loops all types
   r <- looplook:::extract_target_gene_sets(anno, "loops")
-  expect_equal(length(r), 3)  # EP, PP, EG
+  expect_equal(length(r), 3) # EP, PP, EG
+})
+
+test_that("target gene link table records evidence and fallback semantics", {
+  bed_info <- data.frame(
+    input_id = c("Peak_1", "Peak_2"),
+    SYMBOL = c("LINEAR_A", "LINEAR_B"),
+    annotation = c("Promoter", "Distal Intergenic"),
+    All_Loop_Connected_Genes = c("GENE_A;GENE_B;GENE_C", NA),
+    Regulated_promoter_genes = c("GENE_A;GENE_B", NA),
+    Assigned_Target_Genes = c("GENE_A;GENE_B", NA),
+    Regulated_promoter_genes_Filled = c("GENE_A;GENE_B", "LINEAR_B"),
+    Assigned_Target_Genes_Filled = c("GENE_A;GENE_B", "LINEAR_B"),
+    stringsAsFactors = FALSE
+  )
+  hit_df <- data.frame(
+    qid = c(1L),
+    anchor_id = c("A1"),
+    stringsAsFactors = FALSE
+  )
+  loop_annotation <- data.frame(
+    loop_ID = c("L1", "L2"),
+    a1_id = c("A1", "A1"),
+    a2_id = c("A2", "A3"),
+    stringsAsFactors = FALSE
+  )
+  map_info <- data.frame(
+    anchor_id = c("A1", "A2", "A3"),
+    type_code = c("P", "P", "G"),
+    SYMBOL = c("GENE_A", "GENE_B", "GENE_C"),
+    stringsAsFactors = FALSE
+  )
+  ego <- list(
+    A1 = stats::setNames(c("A1", "A2", "A3"), c("A1", "A2", "A3"))
+  )
+
+  links <- looplook:::.build_target_gene_links(
+    hit_df = hit_df,
+    bed_info = bed_info,
+    loop_annotation_final = loop_annotation,
+    map_info = map_info,
+    ego_list_target = ego
+  )
+  links <- looplook:::.mark_target_gene_link_membership(links, bed_info)
+
+  expect_true(all(c(
+    "input_id", "loop_ID", "gene", "gene_role", "source", "evidence",
+    "anchor_role", "used_as_fallback", "in_regulated_promoter",
+    "in_assigned_target", "in_regulated_promoter_filled"
+  ) %in% colnames(links)))
+
+  local_a <- links[links$input_id == "Peak_1" & links$gene == "GENE_A" &
+    links$anchor_role == "local_anchor", , drop = FALSE]
+  expect_setequal(local_a$loop_ID, c("L1", "L2"))
+  expect_true(all(local_a$evidence == "local_promoter_overlap"))
+  expect_true(all(local_a$in_regulated_promoter))
+
+  direct_b <- links[links$input_id == "Peak_1" & links$gene == "GENE_B", , drop = FALSE]
+  expect_true(any(direct_b$evidence == "direct_opposite_promoter"))
+  expect_true(any(direct_b$in_assigned_target))
+
+  fallback_b <- links[links$input_id == "Peak_2" & links$gene == "LINEAR_B", , drop = FALSE]
+  expect_equal(nrow(fallback_b), 1)
+  expect_true(fallback_b$used_as_fallback)
+  expect_equal(fallback_b$evidence, "linear_fallback")
+  expect_true(fallback_b$in_regulated_promoter_filled)
+
+  ev <- looplook:::.summarise_regulated_promoter_evidence(links)
+  expect_true("Peak_1" %in% ev$input_id)
+  expect_match(ev$Regulated_promoter_Evidence[ev$input_id == "Peak_1"], "local_promoter_overlap")
+  expect_match(ev$Regulated_promoter_Evidence[ev$input_id == "Peak_1"], "direct_opposite_promoter")
 })
 
 test_that("compute_refined_stats: all loop types and multi-gene split", {
@@ -89,18 +177,20 @@ test_that("compute_refined_stats: all loop types and multi-gene split", {
     chr2 = rep("chr1", 8), start2 = seq(10000, 17000, 1000), end2 = seq(10500, 17500, 1000),
     cluster_id = paste0("C", c(1, 1, 2, 2, 3, 3, 4, 4)),
     a1_id = paste0("A", 1:8), a2_id = paste0("B", 1:8),
-    anchor1_type = c("P", "P", "E",  "E",  "G",  "G",  "P",  "P"),
-    anchor2_type = c("E", "P", "P",  "G",  "P",  "E",  "eP", "eG"),
-    anchor1_gene = c("G1", "G2;G3", NA,   NA,   "G4", "G5", "G6;G1", "G7"),
-    anchor2_gene = c(NA,   NA,   "G1", "G8", "G9", NA,   "G10",    "G11"),
+    anchor1_type = c("P", "P", "E", "E", "G", "G", "P", "P"),
+    anchor2_type = c("E", "P", "P", "G", "P", "E", "eP", "eG"),
+    anchor1_gene = c("G1", "G2;G3", NA, NA, "G4", "G5", "G6;G1", "G7"),
+    anchor2_gene = c(NA, NA, "G1", "G8", "G9", NA, "G10", "G11"),
     loop_type = c("E-P", "P-P", "E-P", "E-G", "G-P", "E-G", "eP-P", "eG-P"),
     Putative_Target_Genes = c("G1", "G2;G3", "G1", "G8", "G9", "G5", "G6;G1", "G11"),
     stringsAsFactors = FALSE
   )
   vals <- setNames(seq_len(11) * 2, paste0("G", 1:11))
 
-  res <- looplook:::compute_refined_stats(loop_df, upstream_promoter_stats = NULL,
-    vals = vals, threshold = 1, hub_percentile = 0.95)
+  res <- looplook:::compute_refined_stats(loop_df,
+    upstream_promoter_stats = NULL,
+    vals = vals, threshold = 1, hub_percentile = 0.95
+  )
 
   # promoter-centric: G1, G2, G3, G6, G7 should appear as separate rows
   expect_true(all(c("G1", "G2", "G3", "G6", "G7") %in% res$promoter_centric$Gene))
@@ -134,7 +224,9 @@ test_that("compute_refined_stats: hub detection thresholds", {
   gene_loops <- c(rep(10, 3), rep(2, 7))
   loop_df <- do.call(rbind, lapply(seq_along(gene_loops), function(i) {
     n <- gene_loops[i]
-    if (n <= 1) return(NULL)
+    if (n <= 1) {
+      return(NULL)
+    }
     data.frame(
       chr1 = "chr1", start1 = i * 1000, end1 = i * 1000 + 500,
       chr2 = "chr1", start2 = (i + 1) * 2000, end2 = (i + 1) * 2000 + 500,
@@ -150,8 +242,10 @@ test_that("compute_refined_stats: hub detection thresholds", {
   }))
   vals <- setNames(seq_len(10) * 5, paste0("Gene", 1:10))
 
-  res <- looplook:::compute_refined_stats(loop_df, upstream_promoter_stats = NULL,
-    vals = vals, threshold = 1, hub_percentile = 0.50)
+  res <- looplook:::compute_refined_stats(loop_df,
+    upstream_promoter_stats = NULL,
+    vals = vals, threshold = 1, hub_percentile = 0.50
+  )
 
   # With 50th percentile, at least Gene1-3 (with 10 loops each) should be hubs
   high_conn <- res$promoter_centric$Gene[res$promoter_centric$Is_High_Connectivity_Gene == "Yes"]
@@ -160,16 +254,26 @@ test_that("compute_refined_stats: hub detection thresholds", {
 
 test_that("get_feature_class: all categories", {
   classify <- function(x) {
-    if (is.na(x)) return("Unknown")
+    if (is.na(x)) {
+      return("Unknown")
+    }
     x <- tolower(x)
-    if (grepl("promoter", x)) return("P")
-    if (grepl("intergenic|downstream", x)) return("E")
-    if (grepl("exon|intron|utr", x)) return("G")
+    if (grepl("promoter", x)) {
+      return("P")
+    }
+    if (grepl("intergenic|downstream", x)) {
+      return("E")
+    }
+    if (grepl("exon|intron|utr", x)) {
+      return("G")
+    }
     return("E")
   }
-  inputs <- c("Promoter (<=1kb)", "Distal Intergenic", "Intron (uc001.1)",
-              "Exon (uc001.1)", "5-UTR", "Downstream (<=300bp)",
-              "3-UTR", NA_character_)
+  inputs <- c(
+    "Promoter (<=1kb)", "Distal Intergenic", "Intron (uc001.1)",
+    "Exon (uc001.1)", "5-UTR", "Downstream (<=300bp)",
+    "3-UTR", NA_character_
+  )
   expected <- c("P", "E", "G", "G", "G", "E", "G", "Unknown")
   expect_equal(unname(vapply(inputs, classify, character(1))), expected)
 })
@@ -179,7 +283,7 @@ test_that("extract_genes and clean_gene_names: complete edge cases", {
   expect_equal(looplook:::extract_genes(""), NA_character_)
   expect_equal(looplook:::extract_genes(";"), NA_character_)
   expect_equal(looplook:::extract_genes(c(NA, "")), NA_character_)
-  expect_equal(looplook:::extract_genes(" A ; B "), " A ; B ")  # extract_genes splits by ; only, no trimws
+  expect_equal(looplook:::extract_genes(" A ; B "), "A;B") # trimws added
 
   expect_equal(looplook:::clean_gene_names(NULL), character(0))
   expect_equal(looplook:::clean_gene_names(c("A", NA, "", " ")), "A")
@@ -217,8 +321,10 @@ test_that("load_expression_matrix: all input variants", {
 })
 
 test_that("format_annotation_columns: roundtrip", {
-  df <- data.frame(annotation = c("Promoter (<=1kb)", "Intron (uc001.1)"),
-                   stringsAsFactors = FALSE)
+  df <- data.frame(
+    annotation = c("Promoter (<=1kb)", "Intron (uc001.1)"),
+    stringsAsFactors = FALSE
+  )
   res <- looplook:::format_annotation_columns(df)
   expect_equal(res$annotation, c("Promoter", "Intron"))
   expect_equal(res$detail_anno, c("Promoter (<=1kb)", "Intron (uc001.1)"))
@@ -230,11 +336,15 @@ test_that("format_annotation_columns: roundtrip", {
 })
 
 test_that("simplify_annotation: all paths", {
-  x <- c("Promoter (<=1kb)", "Intron (uc001.1)", "Exon (uc001.1)",
-         "Distal Intergenic", "Downstream (<=300bp)", "unknown_type", NA)
+  x <- c(
+    "Promoter (<=1kb)", "Intron (uc001.1)", "Exon (uc001.1)",
+    "Distal Intergenic", "Downstream (<=300bp)", "unknown_type", NA
+  )
   res <- looplook:::simplify_annotation(x)
-  expect_equal(unname(res), c("Promoter", "Intron", "Exon", "Distal Intergenic",
-                      "Downstream", "Others", "Others"))
+  expect_equal(unname(res), c(
+    "Promoter", "Intron", "Exon", "Distal Intergenic",
+    "Downstream", "Others", "Others"
+  ))
 })
 
 test_that("read_robust_general: fill option for ragged lines", {
@@ -263,17 +373,15 @@ test_that("get_colors: RColorBrewer, custom, and fallback", {
 # ════════════════════════════════════════════════════════════════════════════
 
 test_that("annotate_peaks_and_loops: all loop-type combinations", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
+  skip_if_not(sim_has_bioc && !is.null(sim_txdb), "TxDb/OrgDb unavailable")
+  txdb <- sim_txdb
 
   # Get real gene coordinates from TxDb
   genes_gr <- GenomicFeatures::genes(txdb)
   gene_ids <- names(genes_gr)
   map <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db,
-    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID")
+    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID"
+  )
   map <- map[!duplicated(map$ENTREZID), ]
 
   # Pick genes on the same chromosome for intra-chromosomal loops
@@ -291,8 +399,8 @@ test_that("annotate_peaks_and_loops: all loop-type combinations", {
   chr6_genes <- gene_df[gene_df$chr == "chr6", ]
   skip_if(nrow(chr6_genes) < 2, "Need ≥2 genes on same chr for loop tests")
 
-  g1 <- chr6_genes[1, ]  # TFAP2A-AS1: ncRNA
-  g2 <- chr6_genes[2, ]  # SRPK1: protein-coding
+  g1 <- chr6_genes[1, ] # TFAP2A-AS1: ncRNA
+  g2 <- chr6_genes[2, ] # SRPK1: protein-coding
 
   # Anchor A: exactly at g1 TSS → should annotate as Promoter
   # Anchor B: intergenic between g1 and g2 → should annotate as Distal Intergenic (E)
@@ -340,16 +448,14 @@ test_that("annotate_peaks_and_loops: all loop-type combinations", {
 })
 
 test_that("annotate_peaks_and_loops: target BED integration with and without loop overlap", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
+  skip_if_not(sim_has_bioc && !is.null(sim_txdb), "TxDb/OrgDb unavailable")
+  txdb <- sim_txdb
 
   genes_gr <- GenomicFeatures::genes(txdb)
   gene_ids <- names(genes_gr)
   map <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db,
-    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID")
+    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID"
+  )
   map <- map[!duplicated(map$ENTREZID), ]
   gene_df <- data.frame(
     gene_id = gene_ids,
@@ -362,15 +468,17 @@ test_that("annotate_peaks_and_loops: target BED integration with and without loo
   chrX_genes <- gene_df[gene_df$chr == "chrX", ]
   skip_if(nrow(chrX_genes) < 3, "Need ≥3 genes on chrX")
 
-  g1 <- chrX_genes[1, ]  # CLCN4
-  g2 <- chrX_genes[3, ]  # ARMCX3
+  g1 <- chrX_genes[1, ] # CLCN4
+  g2 <- chrX_genes[3, ] # ARMCX3
   tss1 <- ifelse(g1$start < g1$end, g1$start, g1$end)
   tss2 <- ifelse(g2$start < g2$end, g2$start, g2$end)
 
   # One loop: P(g1) <-> E(intergenic)
-  bedpe_lines <- sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
+  bedpe_lines <- sprintf(
+    "chrX\t%d\t%d\tchrX\t%d\t%d",
     tss1 - 1000, tss1 + 500,
-    round((tss1 + tss2) / 2) - 500, round((tss1 + tss2) / 2) + 500)
+    round((tss1 + tss2) / 2) - 500, round((tss1 + tss2) / 2) + 500
+  )
   tmp_bedpe <- tempfile(fileext = ".bedpe")
   writeLines(bedpe_lines, tmp_bedpe)
 
@@ -379,8 +487,8 @@ test_that("annotate_peaks_and_loops: target BED integration with and without loo
   # Peak2: far away from any anchor → orphan (only linear nearest gene)
   tmp_bed <- tempfile(fileext = ".bed")
   writeLines(c(
-    sprintf("chrX\t%d\t%d", tss1 - 500, tss1 + 100),    # overlaps promoter anchor
-    "chrX\t50000000\t50001000"                            # orphan peak
+    sprintf("chrX\t%d\t%d", tss1 - 500, tss1 + 100), # overlaps promoter anchor
+    "chrX\t50000000\t50001000" # orphan peak
   ), tmp_bed)
 
   res <- looplook:::.with_known_upstream_noise_suppressed(
@@ -395,14 +503,39 @@ test_that("annotate_peaks_and_loops: target BED integration with and without loo
 
   ta <- res$target_annotation
   expect_equal(nrow(ta), 2)
+  expect_true(all(c(
+    "Regulated_promoter_Evidence",
+    "Regulated_promoter_genes_Filled",
+    "Regulated_promoter_Fallback_Evidence",
+    "Assigned_Target_Genes_Filled"
+  ) %in% colnames(ta)))
+  expect_s3_class(res$target_gene_links, "data.frame")
+  expect_true(all(c(
+    "input_id", "loop_ID", "anchor_id", "gene", "gene_role", "source",
+    "evidence", "anchor_role", "used_as_fallback",
+    "in_regulated_promoter", "in_assigned_target",
+    "in_regulated_promoter_filled", "in_assigned_target_filled"
+  ) %in% colnames(res$target_gene_links)))
 
   # Peak1 should have 3D-derived targets
   peak1 <- ta[1, ]
   expect_false(is.na(peak1$Assigned_Target_Genes) || peak1$Assigned_Target_Genes == "")
+  expect_false(is.na(peak1$Regulated_promoter_Evidence) || peak1$Regulated_promoter_Evidence == "")
+  expect_true(peak1$Regulated_promoter_Evidence != "none")
+  expect_true(any(res$target_gene_links$input_id == peak1$input_id &
+    res$target_gene_links$source == "loop_anchor"))
 
   # Both should have _Filled column (peak2 falls back to SYMBOL)
   expect_true("Assigned_Target_Genes_Filled" %in% colnames(ta))
-  expect_false(any(is.na(ta$Assigned_Target_Genes_Filled) & ta$Assigned_Target_Genes_Filled == ""))
+  expect_false(any(is.na(ta$Assigned_Target_Genes_Filled) | ta$Assigned_Target_Genes_Filled == ""))
+  peak2 <- ta[2, ]
+  expect_true(is.na(peak2$Regulated_promoter_genes) || peak2$Regulated_promoter_genes == "")
+  expect_false(is.na(peak2$Regulated_promoter_genes_Filled) || peak2$Regulated_promoter_genes_Filled == "")
+  expect_false(is.na(peak2$Regulated_promoter_Fallback_Evidence) ||
+    peak2$Regulated_promoter_Fallback_Evidence %in% c("", "none"))
+  expect_true(any(res$target_gene_links$input_id == peak2$input_id &
+    res$target_gene_links$source == "linear_annotation" &
+    res$target_gene_links$used_as_fallback))
 
   # All_Loop_Connected_Genes should differ from Assigned_Target_Genes
   # (ATGs uses priority: promoter-only for 3D assignment)
@@ -412,8 +545,9 @@ test_that("annotate_peaks_and_loops: target BED integration with and without loo
     for (i in which(has_loop)) {
       assigned <- looplook:::clean_gene_names(ta$Assigned_Target_Genes[i], ";")
       all_conn <- looplook:::clean_gene_names(ta$All_Loop_Connected_Genes[i], ";")
-      if (length(assigned) > 0)
+      if (length(assigned) > 0) {
         expect_true(all(assigned %in% all_conn))
+      }
     }
   }
 
@@ -421,16 +555,14 @@ test_that("annotate_peaks_and_loops: target BED integration with and without loo
 })
 
 test_that("annotate_peaks_and_loops: neighbor_hop controls ego-network radius", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
+  skip_if_not(sim_has_bioc && !is.null(sim_txdb), "TxDb/OrgDb unavailable")
+  txdb <- sim_txdb
 
   genes_gr <- GenomicFeatures::genes(txdb)
   gene_ids <- names(genes_gr)
   map <- AnnotationDbi::select(org.Hs.eg.db::org.Hs.eg.db,
-    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID")
+    keys = gene_ids, columns = "SYMBOL", keytype = "ENTREZID"
+  )
   map <- map[!duplicated(map$ENTREZID), ]
   gene_df <- data.frame(
     gene_id = gene_ids,
@@ -440,317 +572,13 @@ test_that("annotate_peaks_and_loops: neighbor_hop controls ego-network radius", 
     stringsAsFactors = FALSE
   )
   gene_df <- merge(gene_df, map, by.x = "gene_id", by.y = "ENTREZID")
-  chrX_genes <- gene_df[gene_df$chr == "chrX", ]
-  skip_if(nrow(chrX_genes) < 3, "Need ≥3 genes on chrX")
-
-  g1 <- chrX_genes[1, ]
-  g2 <- chrX_genes[2, ]
-  g3 <- chrX_genes[3, ]
-  tss1 <- ifelse(g1$start < g1$end, g1$start, g1$end)
-  tss2 <- ifelse(g2$start < g2$end, g2$start, g2$end)
-  tss3 <- ifelse(g3$start < g3$end, g3$start, g3$end)
-
-  # Build 3 anchors linked as: A(g1) — B(intergenic) — C(g2)
-  # hop=0: ego for A gives only B (no gene)
-  # hop=1: ego for A gives B and C (reaching g2)
-  # hop=2 (target): ego for A gives B, C and also D(g3) if D connects to C
-  bedpe_lines <- c(
-    sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
-      tss1 - 1000, tss1 + 500, round((tss1 + tss2) / 2) - 500, round((tss1 + tss2) / 2) + 500),
-    sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
-      round((tss1 + tss2) / 2) - 500, round((tss1 + tss2) / 2) + 500, tss2 - 1000, tss2 + 500)
-  )
-  tmp_bedpe <- tempfile(fileext = ".bedpe")
-  writeLines(bedpe_lines, tmp_bedpe)
-
-  res0 <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::annotate_peaks_and_loops(
-      bedpe_file = tmp_bedpe, txdb = txdb, org_db = "org.Hs.eg.db", species = "hg19",
-      neighbor_hop = 0, out_dir = tempdir(), project_name = "Sim_Hop0",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-  res1 <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::annotate_peaks_and_loops(
-      bedpe_file = tmp_bedpe, txdb = txdb, org_db = "org.Hs.eg.db", species = "hg19",
-      neighbor_hop = 1, out_dir = tempdir(), project_name = "Sim_Hop1",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-
-  # With hop=0, anchor A gets ego genes only from its direct neighbor (B, intergenic → no gene)
-  # With hop=1, anchor A gets ego genes from C too (which is a promoter)
-  # So Putative_Target_Genes should be richer in hop=1
-  la0 <- res0$loop_annotation
-  la1 <- res1$loop_annotation
-
-  # The promoter anchor in L1 should have Putative_Target_Genes
-  l1_0 <- la0[1, ]
-  l1_1 <- la1[1, ]
-  expect_false(is.na(l1_1$Putative_Target_Genes) || l1_1$Putative_Target_Genes == "")
-
-  unlink(tmp_bedpe)
-})
-
-test_that("refine_loop_anchors_by_expression: reclassify cascade", {
-  skip_if_not_installed("org.Hs.eg.db")
-  rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
-  expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
-  skip_if(rdata_path == "" || expr_path == "")
-
-  tmp <- new.env()
-  load(rdata_path, envir = tmp)
-  res <- tmp[[ls(tmp)[1]]]
-  res$loop_annotation <- head(res$loop_annotation, 30)
-  res$target_annotation <- head(res$target_annotation, 10)
-  res$promoter_centric_stats <- head(res$promoter_centric_stats, 30)
-  res$distal_element_stats <- head(res$distal_element_stats, 30)
-
-  # Step A: without reclassify
-  ref_nr <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::refine_loop_anchors_by_expression(
-      annotation_res = res, expr_matrix_file = expr_path,
-      sample_columns = c("con1", "con2"), threshold = 1,
-      reclassify_by_expression = FALSE,
-      out_dir = tempdir(), project_name = "Sim_NoReclassify",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-
-  # Step B: with reclassify
-  ref_wr <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::refine_loop_anchors_by_expression(
-      annotation_res = res, expr_matrix_file = expr_path,
-      sample_columns = c("con1", "con2"), threshold = 1,
-      reclassify_by_expression = TRUE,
-      out_dir = tempdir(), project_name = "Sim_Reclassify",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-
-  # Both should return valid structures
-  expect_type(ref_nr, "list")
-  expect_type(ref_wr, "list")
-  expect_true("Putative_Target_Genes" %in% colnames(ref_nr$loop_annotation))
-  expect_true("Putative_Target_Genes" %in% colnames(ref_wr$loop_annotation))
-
-  # With reclassify enabled, loop types may include eP/eG prefixes
-  loop_types_wr <- unique(ref_wr$loop_annotation$loop_type)
-  loop_types_nr <- unique(ref_nr$loop_annotation$loop_type)
-  # The reclassified set may have more types (including eP, eG variants)
-  expect_true(length(loop_types_wr) >= length(loop_types_nr) ||
-    any(grepl("e", loop_types_wr)))
-})
-
-test_that("pipeline: empty and edge-case inputs", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
-
-  # Single loop on different chromosomes → no clustering possible
-  tmp_bedpe <- tempfile(fileext = ".bedpe")
-  writeLines("chr1\t1000000\t1000500\tchr6\t10412000\t10412600", tmp_bedpe)
-
-  res <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::annotate_peaks_and_loops(
-      bedpe_file = tmp_bedpe, txdb = txdb, org_db = "org.Hs.eg.db",
-      species = "hg19", out_dir = tempdir(), project_name = "Sim_Trans",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-  # Inter-chromosomal loops should still annotate
-  expect_equal(nrow(res$loop_annotation), 1)
-  expect_false(res$loop_annotation$loop_type == "Unknown")
-
-  unlink(tmp_bedpe)
-})
-
-test_that("pipeline: expression matrix with NA values", {
-  tmp_expr <- tempfile(fileext = ".tsv")
-  writeLines("Gene\tS1\tS2\nA\t10\tNA\nB\tNA\t20\nC\t5\t5", tmp_expr)
-
-  vals <- looplook:::load_expression_matrix(tmp_expr, c("S1", "S2"))
-  expect_equal(vals[["A"]], 10)  # mean of 10 and NA = 10
-  expect_equal(vals[["B"]], 20)  # mean of NA and 20 = 20
-  expect_equal(vals[["C"]], 5)
-
-  unlink(tmp_expr)
-})
-
-test_that(".anchor_matches_targets: case and whitespace", {
-  expect_true(looplook:::.anchor_matches_targets("  TP53 ; BRCA1 ", c("BRCA1", "EGFR")))
-  expect_false(looplook:::.anchor_matches_targets("TP53;BRCA1", c("EGFR")))
-  expect_false(looplook:::.anchor_matches_targets("", c("A")))
-  expect_false(looplook:::.anchor_matches_targets(NA_character_, c("A")))
-})
-
-test_that(".prepare_motif_anchor_sets: handles mixed anchor types", {
-  loop_df <- data.frame(
-    chr1 = rep("chr1", 4), start1 = c(100, 300, 500, 700), end1 = c(150, 350, 550, 750),
-    chr2 = rep("chr1", 4), start2 = c(200, 400, 600, 800), end2 = c(250, 450, 650, 850),
-    anchor1_gene = c("TP53", "CTRL1", "CTRL2", "CTRL3"),
-    anchor1_type = c("P", "P", "P", "E"),
-    anchor2_gene = c("EnhA", "BRCA1", "BgEnh", "PROM1"),
-    anchor2_type = c("E", "P", "E", "P"),
-    stringsAsFactors = FALSE
-  )
-
-  # Target TP53 → L1 matches (a1=P, a2=E), L2-L4 are background
-  ms <- looplook:::.prepare_motif_anchor_sets(loop_df, c("TP53"))
-  expect_equal(ms$target_loop_n, 1)
-  # FG proximal = a1 of L1 (TP53 P anchor)
-  expect_equal(length(ms$proximal_fg), 1)
-  # FG distal = a2 of L1 (EnhA E anchor)
-  expect_equal(length(ms$distal_fg), 1)
-  # BG should have the remaining anchors from non-target loops
-  expect_equal(length(ms$proximal_bg), 4)  # L2 a1, L3 a1, L2 a2, L4 a2
-  expect_equal(length(ms$distal_bg), 2)    # a2 of L2, L3 (E type, non-target) + L4 distal
-
-  # Target both TP53 and BRCA1
-  ms2 <- looplook:::.prepare_motif_anchor_sets(loop_df, c("TP53", "BRCA1"))
-  expect_equal(ms2$target_loop_n, 2)
-
-  # Target none → 0 target loops
-  ms3 <- looplook:::.prepare_motif_anchor_sets(loop_df, c("NONEXISTENT"))
-  expect_equal(ms3$target_loop_n, 0)
-})
-
-test_that(".subset_motif_loop_df: task-to-loop_type mapping", {
-  df <- data.frame(loop_type = c("E-P", "P-P", "G-P", "E-G"), stringsAsFactors = FALSE)
-
-  r <- looplook:::.subset_motif_loop_df(df, "loops", "EP_Genes")
-  expect_true(all(r$loop_type == "E-P"))
-
-  r <- looplook:::.subset_motif_loop_df(df, "loops", "PP_Genes")
-  expect_true(all(r$loop_type == "P-P"))
-
-  r <- looplook:::.subset_motif_loop_df(df, "loops", "GP_Genes")
-  expect_true(all(r$loop_type == "G-P"))
-
-  # Non-matching task returns full df
-  r <- looplook:::.subset_motif_loop_df(df, "loops", "ZZ_Genes")
-  expect_equal(nrow(r), nrow(df))
-
-  # Non-loops source returns full df
-  r <- looplook:::.subset_motif_loop_df(df, "targets", "EP_Genes")
-  expect_equal(nrow(r), nrow(df))
-})
-
-test_that(".deduplicate_anchor_df and .anchor_df_to_gr: robustness", {
-  df <- data.frame(
-    anchor_id = c("A1", "A1", "", NA),
-    chr = c("chr1", "chr1", "chr2", "chr3"),
-    start = c(100, 100, 200, 300),
-    end = c(150, 150, 250, 350),
-    anchor_type = c("P", "P", "E", "G"),
-    stringsAsFactors = FALSE
-  )
-  dedup <- looplook:::.deduplicate_anchor_df(df)
-  expect_equal(nrow(dedup), 3)  # A1, chr2_200_250, chr3_300_350
-  expect_false(any(duplicated(dedup$anchor_id)))
-
-  # empty input
-  empty <- looplook:::.deduplicate_anchor_df(data.frame(
-    anchor_id = character(0), chr = character(0),
-    start = integer(0), end = integer(0), anchor_type = character(0),
-    stringsAsFactors = FALSE
-  ))
-  expect_equal(nrow(empty), 0)
-
-  # convert to GRanges
-  gr <- looplook:::.anchor_df_to_gr(df)
-  expect_s4_class(gr, "GRanges")
-})
-
-
-# ════════════════════════════════════════════════════════════════════════════
-# Part C: Additional integration patterns (sample TxDb required)
-# ════════════════════════════════════════════════════════════════════════════
-
-test_that("annotate_peaks_and_loops: E-E and G-G loop types", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
-
-  genes_gr <- GenomicFeatures::genes(txdb)
-  gene_ids <- names(genes_gr)
-
-  # Find genes with enough spacing to place intergenic anchors between them
-  gene_df <- data.frame(
-    gene_id = gene_ids,
-    chr = as.character(GenomicRanges::seqnames(genes_gr)),
-    start = GenomicRanges::start(genes_gr),
-    end = GenomicRanges::end(genes_gr),
-    stringsAsFactors = FALSE
-  )
-
-  # chr8 has IDO2 (~39.8M) and MIR1204 (~128.8M) — far apart, plenty of intergenic space
-  # Place two intergenic anchors (E-E) between them
-  chr8_genes <- gene_df[gene_df$chr == "chr8", ]
-  skip_if(nrow(chr8_genes) < 2, "Need ≥2 genes on chr8")
-
-  g1 <- chr8_genes[1, ]
-  mid <- round((g1$end + 50000000))
-
-  # E-E loop: two intergenic anchors
-  # G-G loop: place anchors inside gene bodies
-  tss_g1 <- ifelse(g1$start < g1$end, g1$start, g1$end)
-
-  bedpe_lines <- c(
-    # L1: E-E (two intergenic anchors far from any gene)
-    sprintf("chr8\t%d\t%d\tchr8\t%d\t%d",
-      mid - 500, mid + 500, mid + 10000 - 500, mid + 10000 + 500),
-    # L2: G-G within same gene body (anchor both inside g1)
-    sprintf("chr8\t%d\t%d\tchr8\t%d\t%d",
-      tss_g1 + 5000, tss_g1 + 5500, tss_g1 + 7000, tss_g1 + 7500)
-  )
-  tmp_bedpe <- tempfile(fileext = ".bedpe")
-  writeLines(bedpe_lines, tmp_bedpe)
-
-  res <- looplook:::.with_known_upstream_noise_suppressed(
-    looplook::annotate_peaks_and_loops(
-      bedpe_file = tmp_bedpe, txdb = txdb, org_db = "org.Hs.eg.db",
-      species = "hg19", out_dir = tempdir(), project_name = "Sim_EE_GG",
-      write_output = FALSE, quiet = TRUE
-    )
-  )
-
-  la <- res$loop_annotation
-  loop_types <- sort(unique(la$loop_type))
-  # E-E and G-G should be present (ChIPseeker classifies intergenic as E,
-  # and internal gene body regions as Intron/Exon → G)
-  expect_true(any(grepl("E-E", loop_types)) || any(grepl("G-G", loop_types)))
-
-  unlink(tmp_bedpe)
-})
-
-test_that("annotate_peaks_and_loops: target peak connected to multiple loops", {
-  skip_if_not_installed("org.Hs.eg.db")
-  txdb <- AnnotationDbi::loadDb(
-    system.file("extdata", "hg19_knownGene_sample.sqlite", package = "GenomicFeatures")
-  )
-  skip_if(is.null(txdb), "Sample TxDb unavailable")
-
-  genes_gr <- GenomicFeatures::genes(txdb)
-  gene_ids <- names(genes_gr)
-  gene_df <- data.frame(
-    gene_id = gene_ids,
-    chr = as.character(GenomicRanges::seqnames(genes_gr)),
-    start = GenomicRanges::start(genes_gr),
-    end = GenomicRanges::end(genes_gr),
-    stringsAsFactors = FALSE
-  )
 
   # Use chrX genes ARMCX3 and FAM199X (close enough for realistic loops)
   chrX_genes <- gene_df[gene_df$chr == "chrX", ]
   skip_if(nrow(chrX_genes) < 3, "Need ≥3 genes on chrX")
 
-  g1 <- chrX_genes[3, ]  # ARMCX3
-  g2 <- chrX_genes[4, ]  # FAM199X
+  g1 <- chrX_genes[3, ] # ARMCX3
+  g2 <- chrX_genes[4, ] # FAM199X
   tss1 <- ifelse(g1$start < g1$end, g1$start, g1$end)
   tss2 <- ifelse(g2$start < g2$end, g2$start, g2$end)
 
@@ -759,15 +587,21 @@ test_that("annotate_peaks_and_loops: target peak connected to multiple loops", {
   # L2: P(A at g1) — E(C intergenic, different location)
   # L3: P(A at g1) — P(D at g2)
   anchor_a_start <- tss1 - 1000
-  anchor_a_end   <- tss1 + 500
+  anchor_a_end <- tss1 + 500
 
   bedpe_lines <- c(
-    sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
-      anchor_a_start, anchor_a_end, tss1 + 50000 - 500, tss1 + 50000 + 500),
-    sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
-      anchor_a_start, anchor_a_end, tss1 + 80000 - 500, tss1 + 80000 + 500),
-    sprintf("chrX\t%d\t%d\tchrX\t%d\t%d",
-      anchor_a_start, anchor_a_end, tss2 - 1000, tss2 + 500)
+    sprintf(
+      "chrX\t%d\t%d\tchrX\t%d\t%d",
+      anchor_a_start, anchor_a_end, tss1 + 50000 - 500, tss1 + 50000 + 500
+    ),
+    sprintf(
+      "chrX\t%d\t%d\tchrX\t%d\t%d",
+      anchor_a_start, anchor_a_end, tss1 + 80000 - 500, tss1 + 80000 + 500
+    ),
+    sprintf(
+      "chrX\t%d\t%d\tchrX\t%d\t%d",
+      anchor_a_start, anchor_a_end, tss2 - 1000, tss2 + 500
+    )
   )
   tmp_bedpe <- tempfile(fileext = ".bedpe")
   writeLines(bedpe_lines, tmp_bedpe)
@@ -795,14 +629,22 @@ test_that("annotate_peaks_and_loops: target peak connected to multiple loops", {
 
   # Assigned_Target_Genes should not be empty (at least g1 via L3)
   expect_false(is.na(ta$Assigned_Target_Genes) || ta$Assigned_Target_Genes == "")
+  expect_s3_class(res$target_gene_links, "data.frame")
+  linked_local_rows <- res$target_gene_links[
+    res$target_gene_links$input_id == ta$input_id[1] &
+      res$target_gene_links$anchor_role == "local_anchor" &
+      !is.na(res$target_gene_links$loop_ID), ,
+    drop = FALSE
+  ]
+  expect_gte(length(unique(linked_local_rows$loop_ID)), 3)
 
   unlink(c(tmp_bedpe, tmp_bed))
 })
 
 test_that("refine: full target-assignment fallback chain", {
-  skip_if_not_installed("org.Hs.eg.db")
+  skip_if_not(sim_has_bioc, "OrgDb unavailable")
   rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
-  expr_path  <- system.file("extdata", "example_tpm.txt", package = "looplook")
+  expr_path <- system.file("extdata", "example_tpm.txt", package = "looplook")
   skip_if(rdata_path == "" || expr_path == "")
 
   tmp <- new.env()
@@ -839,11 +681,56 @@ test_that("refine: full target-assignment fallback chain", {
   if (!is.null(ref$target_annotation)) {
     ta <- ref$target_annotation
     expect_true("Assigned_Target_Genes_Filled" %in% colnames(ta))
+    expect_true("Regulated_promoter_Evidence" %in% colnames(ta) ||
+      is.null(res$target_annotation$Regulated_promoter_Evidence))
+    if ("Regulated_promoter_Evidence" %in% colnames(ta)) {
+      expect_false(any(is.na(ta$Regulated_promoter_Evidence)))
+    }
     # _Filled column should never be NA when Assigned_Target_Genes is present
     has_assigned <- !is.na(ta$Assigned_Target_Genes) & ta$Assigned_Target_Genes != ""
     filled_na <- is.na(ta$Assigned_Target_Genes_Filled) | ta$Assigned_Target_Genes_Filled == ""
     expect_false(any(has_assigned & filled_na))
   }
+  if (!is.null(ref$target_gene_links)) {
+    expect_s3_class(ref$target_gene_links, "data.frame")
+    expect_true("used_as_fallback" %in% colnames(ref$target_gene_links))
+  }
+})
+
+test_that("refined target gene links retain only post-refinement targets", {
+  target_gene_links <- data.frame(
+    input_id = c("Peak_1", "Peak_1", "Peak_2"),
+    loop_ID = c("Loop_1", "Loop_1", NA_character_),
+    anchor_id = c("Anchor_1", "Anchor_2", NA_character_),
+    gene = c("ACTIVE", "SILENT", "FALLBACK"),
+    gene_role = c("promoter", "promoter", "linear_annotation"),
+    source = c("loop_anchor", "loop_anchor", "linear_annotation"),
+    evidence = c("direct_opposite_promoter", "direct_opposite_promoter", "linear_annotation"),
+    anchor_role = c("opposite_anchor", "opposite_anchor", "linear_annotation"),
+    stringsAsFactors = FALSE
+  )
+  bed_info <- data.frame(
+    input_id = c("Peak_1", "Peak_2"),
+    Regulated_promoter_genes = c("ACTIVE", NA_character_),
+    Assigned_Target_Genes = c("ACTIVE", NA_character_),
+    All_Loop_Connected_Genes = c("ACTIVE", NA_character_),
+    Regulated_promoter_genes_Filled = c("ACTIVE", "FALLBACK"),
+    Assigned_Target_Genes_Filled = c("ACTIVE", "FALLBACK"),
+    stringsAsFactors = FALSE
+  )
+  vals <- c(ACTIVE = 10, SILENT = 0, FALLBACK = 5)
+
+  refined_links <- looplook:::.filter_refined_target_gene_links(
+    target_gene_links, bed_info, vals,
+    threshold = 1
+  )
+
+  expect_setequal(refined_links$gene, c("ACTIVE", "FALLBACK"))
+  expect_false("SILENT" %in% refined_links$gene)
+  expect_true(all(refined_links$Passes_Expression_Filter))
+  expect_true(refined_links$used_as_fallback[refined_links$gene == "FALLBACK"])
+  expect_true(all(c("Mean_Expression", "Passes_Expression_Filter") %in%
+    colnames(refined_links)))
 })
 
 

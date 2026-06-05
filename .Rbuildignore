@@ -16,6 +16,10 @@
 ^.*looplook_results$
 ^.*target_sankey.*$
 ^tests/testthat/Rplots\.pdf$
+^Rplots\.pdf$
+^tests/testthat/testthat-problems\.rds$
+^tests/testthat/_problems/
+^tests/testthat/_snaps/
 ^.*\.Rcheck$
 ^.*\.tar\.gz$
 ^PACKAGES(\.gz|\.rds)?$
@@ -24,3 +28,4 @@
 ^reviewer-response\.md$
 ^Outputs$
 ^Library$
+coverage
