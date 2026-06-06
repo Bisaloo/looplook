@@ -2227,7 +2227,7 @@ refine_loop_anchors_by_expression <- function(
   if (!"SANKEY_RAW_GENES" %in% colnames(bed_info)) {
     return(NULL)
   }
-  if (!requireNamespace("networkD3", quietly = TRUE)) {
+  if (!requireNamespace("networkD3", quietly = TRUE) || !requireNamespace("htmlwidgets", quietly = TRUE)) {
     return(NULL)
   }
 

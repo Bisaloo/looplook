@@ -975,8 +975,10 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
         ggplot2::labs(title = "Regulation: High_connectivity vs Others", subtitle = get_pval_str(y_var), x = NULL, y = y_lab) +
         clean_theme
     }
-    plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") + ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey45", linewidth = 0.6)
-    plots_list$Raincloud_Expr <- base_box("Expression", "Log2(Mean Expression + 1)")
+    if (requireNamespace("ggdist", quietly = TRUE)) {
+      plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") + ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey45", linewidth = 0.6)
+      plots_list$Raincloud_Expr <- base_box("Expression", "Log2(Mean Expression + 1)")
+    }
   }
   return(plots_list)
 }
@@ -1399,6 +1401,9 @@ run_distal_motif_analysis <- function(
     return(NULL)
   }
 
+  if (!requireNamespace("ggseqlogo", quietly = TRUE)) {
+    return(NULL)
+  }
   return(ggseqlogo::ggseqlogo(plot_list, ncol = 1) + ggplot2::theme_classic() + ggplot2::theme(axis.text.x = ggplot2::element_blank(), strip.text = ggplot2::element_text(size = 10, face = "bold", hjust = 0), strip.background = ggplot2::element_rect(fill = "grey95", color = NA)) + ggplot2::labs(y = "Bits", title = paste0("Top ", top_n, " Enriched Motifs (SeqLogo)")))
 }
 
