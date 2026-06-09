@@ -17,7 +17,7 @@ A list with two elements:
 \item{\code{gi}}{Reduced \code{\link[InteractionSet]{GInteractions}} object, one per cluster.}
 \item{\code{membership}}{Integer vector indicating cluster assignment for each input loop.}
 }
-Metadata columns include \code{cluster_id}, \code{n_members}, and averaged \code{score}.
+Metadata columns include \code{cluster_id}, \code{n_members}, \code{n_reps}, and averaged \code{score}.
 }
 \description{
 Merges spatially proximal chromatin loops into consensus interactions using graph-based clustering.

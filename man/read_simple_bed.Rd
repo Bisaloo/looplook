@@ -4,10 +4,14 @@
 \alias{read_simple_bed}
 \title{Read a Simple BED File into a GRanges Object}
 \usage{
-read_simple_bed(bed_file)
+read_simple_bed(bed_file, quiet = FALSE)
 }
 \arguments{
 \item{bed_file}{Character. Path to a BED file (must be tab-delimited).}
+
+\item{quiet}{Logical. If \code{TRUE}, suppress data-quality warnings
+(e.g., unusually narrow/wide intervals).
+Errors are never suppressed. Default: \code{FALSE}.}
 }
 \value{
 A \code{\link[GenomicRanges]{GRanges}} object, or \code{NULL} if \code{bed_file} is \code{NULL}.

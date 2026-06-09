@@ -11,14 +11,14 @@ run_distal_motif_analysis(
   pval_thresh,
   current_proj_name,
   top_n = 5,
-  jaspar_db = JASPAR2020::JASPAR2020,
+  jaspar_db = NULL,
   jaspar_collection = "CORE",
   motif_max_bg = 2000L,
   motif_gc_bins = 5L
 )
 }
 \arguments{
-\item{jaspar_db}{A JASPAR database object (e.g., \code{JASPAR2020::JASPAR2020} or \code{JASPAR2024::JASPAR2024}). Default: \code{JASPAR2020::JASPAR2020}.}
+\item{jaspar_db}{A JASPAR database object (e.g., \code{JASPAR2020::JASPAR2020} or \code{JASPAR2024::JASPAR2024}). Default: \code{NULL} (auto-resolves to \code{JASPAR2020::JASPAR2020} if installed).}
 
 \item{jaspar_collection}{Character. JASPAR collection to query (e.g., \code{"CORE"}, \code{"CNE"}). Default: \code{"CORE"}.}
 }

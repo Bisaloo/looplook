@@ -129,10 +129,17 @@ test_that("reduce_clusters_dt excludes NA-score sources from n_reps", {
 })
 
 # --- bedpe_to_gi: validation and score detection ---
-test_that("bedpe_to_gi rejects start > end", {
+test_that("bedpe_to_gi rejects start >= end (zero-width or invalid)", {
   tmp <- tempfile(fileext = ".bedpe")
   writeLines("chr1\t200\t100\tchr1\t400\t500", tmp)
-  expect_error(looplook:::bedpe_to_gi(tmp), "start > end")
+  expect_error(looplook:::bedpe_to_gi(tmp), "start >= end")
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi rejects zero-width anchor (start == end)", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t100\tchr1\t400\t500", tmp)
+  expect_error(looplook:::bedpe_to_gi(tmp), "start >= end")
   unlink(tmp)
 })
 
@@ -346,4 +353,143 @@ test_that("consolidate_chromatin_loops writes output file", {
   )
   expect_true(file.exists(out_file))
   unlink(c(f1, f2, out_file))
+})
+
+# --- Production-grade boundary tests (from _problems/) ---
+test_that("bedpe_to_gi warns when auto-detected score looks like p-values", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines(c(
+    "chr1\t100\t200\tchr1\t400\t500\t0.01",
+    "chr1\t150\t250\tchr1\t450\t550\t0.05"
+  ), tmp)
+  expect_warning(looplook:::bedpe_to_gi(tmp), "resemble p-values")
+  unlink(tmp)
+})
+
+test_that("bedpe_to_gi errors when score_col points to non-numeric column", {
+  tmp <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t300\t400\tname", tmp)
+  expect_error(
+    looplook:::bedpe_to_gi(tmp, score_col = 7),
+    "does not contain predominantly numeric"
+  )
+  unlink(tmp)
+})
+
+test_that("consolidate_chromatin_loops returns empty on min_raw_score > all scores (intersect)", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t300\t400\t1", f1)
+  writeLines("chr1\t100\t200\tchr1\t300\t400\t5", f2)
+  res <- consolidate_chromatin_loops(
+    files = c(f1, f2), mode = "intersect",
+    min_raw_score = 10, quiet = TRUE
+  )
+  expect_s4_class(res, "GInteractions")
+  expect_equal(length(res), 0)
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops returns empty on min_raw_score > all scores (consensus)", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t300\t400\t1", f1)
+  writeLines("chr1\t150\t250\tchr1\t350\t450\t1", f2)
+  res <- consolidate_chromatin_loops(
+    files = c(f1, f2), mode = "consensus",
+    min_raw_score = 10, quiet = TRUE
+  )
+  expect_s4_class(res, "GInteractions")
+  expect_equal(length(res), 0)
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops chaining_policy='warn' warns on wide clusters", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t0\t100\tchr1\t200\t300\t100", f1)
+  writeLines(c(
+    "chr1\t5\t105\tchr1\t205\t305\t20",
+    "chr1\t10\t110\tchr1\t210\t310\t25",
+    "chr1\t15\t115\tchr1\t215\t315\t30"
+  ), f2)
+  expect_warning(
+    consolidate_chromatin_loops(
+      files = c(f1, f2), mode = "consensus", gap = 25,
+      chaining_policy = "warn", quiet = TRUE
+    ),
+    "max_span > chaining threshold"
+  )
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops chaining_policy='drop' removes wide clusters", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t0\t100\tchr1\t200\t300\t100", f1)
+  writeLines(c(
+    "chr1\t5\t105\tchr1\t205\t305\t20",
+    "chr1\t10\t110\tchr1\t210\t310\t25",
+    "chr1\t15\t115\tchr1\t215\t315\t30"
+  ), f2)
+  res_drop <- consolidate_chromatin_loops(
+    files = c(f1, f2), mode = "consensus", gap = 25,
+    chaining_policy = "drop", quiet = TRUE
+  )
+  # With chaining, the single wide cluster spanning all loops is dropped
+  expect_equal(length(res_drop), 0L)
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops chaining_policy='error' stops on wide clusters", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t0\t100\tchr1\t200\t300\t100", f1)
+  writeLines(c(
+    "chr1\t5\t105\tchr1\t205\t305\t20",
+    "chr1\t10\t110\tchr1\t210\t310\t25",
+    "chr1\t15\t115\tchr1\t215\t315\t30"
+  ), f2)
+  expect_error(
+    consolidate_chromatin_loops(
+      files = c(f1, f2), mode = "consensus", gap = 25,
+      chaining_policy = "error", quiet = TRUE
+    ),
+    "max_span > chaining threshold"
+  )
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops chaining_policy='none' runs silently on wide clusters", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t0\t100\tchr1\t200\t300\t100", f1)
+  writeLines(c(
+    "chr1\t5\t105\tchr1\t205\t305\t20",
+    "chr1\t10\t110\tchr1\t210\t310\t25",
+    "chr1\t15\t115\tchr1\t215\t315\t30"
+  ), f2)
+  expect_no_warning(
+    consolidate_chromatin_loops(
+      files = c(f1, f2), mode = "consensus", gap = 25,
+      chaining_policy = "none", quiet = TRUE
+    )
+  )
+  unlink(c(f1, f2))
+})
+
+test_that("consolidate_chromatin_loops write_output=FALSE does not create directory", {
+  f1 <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
+  f2 <- system.file("extdata", "example_loops_2.bedpe", package = "looplook")
+  skip_if(f1 == "" || f2 == "")
+  out_dir <- tempfile(pattern = "looplook_cons_nowrite_")
+  out_file <- file.path(out_dir, "loops.bedpe")
+  unlink(out_dir, recursive = TRUE, force = TRUE)
+  expect_false(dir.exists(out_dir))
+  gi <- consolidate_chromatin_loops(
+    files = c(f1, f2), mode = "consensus", gap = 1000,
+    out_file = out_file, write_output = FALSE, quiet = TRUE
+  )
+  expect_s4_class(gi, "GInteractions")
+  expect_false(dir.exists(out_dir))
 })

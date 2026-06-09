@@ -27,8 +27,10 @@ plot_peaks_interactions(
 )
 }
 \arguments{
-\item{bedpe_file}{Character. Path to a BEDPE file (at least 6 columns; 7th
-column used as score if present).}
+\item{bedpe_file}{Character. Path to a BEDPE file (at least 6 columns).
+If an 8th column is present and numeric, it is used as the interaction
+score; otherwise the 7th column is tried. If neither is numeric, scores
+default to 0.}
 
 \item{target_bed}{Optional character. Path to a BED file (e.g., peaks) to
 overlay below the loop track.}
@@ -94,15 +96,15 @@ and annotated genes. Loop arcs can be colored or sized by interaction score
 \examples{
 bedpe_path <- tempfile(fileext = ".bedpe")
 writeLines(
-  "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
-  bedpe_path
+    "chr1\t11890000\t11890500\tchr1\t11905000\t11905500",
+    bedpe_path
 )
 p <- plot_peaks_interactions(
-  bedpe_file = bedpe_path,
-  chr = "chr1",
-  from = 11884299,
-  to = 12106581,
-  show_gene_track = FALSE
+    bedpe_file = bedpe_path,
+    chr = "chr1",
+    from = 11884299,
+    to = 12106581,
+    show_gene_track = FALSE
 )
 print(p)
 }

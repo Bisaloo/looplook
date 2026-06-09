@@ -4,7 +4,7 @@
 \alias{bedpe_to_gi}
 \title{Read BEDPE File into a GInteractions Object}
 \usage{
-bedpe_to_gi(bedpe_file, score_col = NULL)
+bedpe_to_gi(bedpe_file, score_col = NULL, quiet = FALSE)
 }
 \arguments{
 \item{bedpe_file}{Character. Path to a BEDPE file. Must contain at least six columns:
@@ -20,6 +20,10 @@ parameters such as \code{min_score} in
 interactions}. If your score column contains p-values or other metrics where
 \emph{smaller is better}, convert it first (e.g. \code{-log10(p)}) or filter
 manually after consolidation.}
+
+\item{quiet}{Logical. If \code{TRUE}, suppress data-quality warnings
+(e.g., unusually narrow/wide anchors, p-value-like scores).
+Errors are never suppressed. Default: \code{FALSE}.}
 }
 \value{
 A \code{\link[InteractionSet]{GInteractions}} object with a \code{score} metadata column
@@ -39,6 +43,9 @@ ensuring compatibility with \code{GInteractions(mode = "strict")}.
 The function attempts to automatically detect a numeric score column.
 It checks the 8th column first (standard for many tools); if not numeric,
 it falls back to the 7th column. Non-numeric values are treated as 0.
+When \code{score_col} is specified explicitly, the function requires that
+column to contain predominantly numeric values (>=50\\%) and will stop
+otherwise.
 }
 \examples{
 # 1. Locate the example BEDPE file included in the package

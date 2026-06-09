@@ -46,6 +46,7 @@ params:
   lfc_col: "log2FoldChange"
   metadata_file: null
   precomputed_res: null
+  seed: null
 ---
 
 <style>

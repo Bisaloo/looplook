@@ -24,7 +24,7 @@ refine_loop_anchors_by_expression(
 \arguments{
 \item{annotation_res}{List. The raw foundational output object returned by \code{\link{annotate_peaks_and_loops}}.}
 
-\item{expr_matrix_file}{Path to a normalised expression matrix (TPM/FPKM, genes × samples). Required for refinement. Default: \code{NULL}.}
+\item{expr_matrix_file}{Path to a normalised expression matrix (TPM/FPKM, genes x samples). Required for refinement. Default: \code{NULL}.}
 
 \item{sample_columns}{Character vector or integer indices. Columns in \code{expr_matrix_file} to average. Default: \code{NULL}.}
 
@@ -44,7 +44,7 @@ refine_loop_anchors_by_expression(
 
 \item{reclassify_by_expression}{Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.}
 
-\item{hub_percentile}{Numeric (0–1). Node-degree quantile for hub detection. Default: \code{0.95}.}
+\item{hub_percentile}{Numeric (0-1). Node-degree quantile for hub detection. Default: \code{0.95}.}
 
 \item{write_output}{Logical. If \code{TRUE} (default), write the refined Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
 
@@ -53,7 +53,7 @@ refine_loop_anchors_by_expression(
 \value{
 An invisible named list:
 \itemize{
-\item \code{loop_annotation} — Full refined 3D network with updated \code{loop_type}
+\item \code{loop_annotation} -- Full refined 3D network with updated \code{loop_type}
 (e.g., eP-P) and two target gene columns:
 \itemize{
 \item \code{Active_Target_Genes}: Expression-filtered active-only targets (no fallback).
@@ -67,11 +67,11 @@ Refinement status columns:
 or \code{"structural_only_no_active_target"}).
 All structural loops are preserved; filter on \code{Retained_In_Functional_Network}
 for the high-confidence active subset.
-\item \code{anchor_loci_annotation} — Filtered non-redundant anchor-locus annotations with expressed targets.
-\item \code{anchor_annotation} — Backward-compatible alias of \code{anchor_loci_annotation}.
-\item \code{promoter_centric_stats} — Gene-level connectivity statistics.
-\item \code{distal_element_stats} — Distal-element connectivity statistics.
-\item \code{target_annotation} — Target features (peaks) with gene assignments.
+\item \code{anchor_loci_annotation} -- Filtered non-redundant anchor-locus annotations with expressed targets.
+\item \code{anchor_annotation} -- Backward-compatible alias of \code{anchor_loci_annotation}.
+\item \code{promoter_centric_stats} -- Gene-level connectivity statistics.
+\item \code{distal_element_stats} -- Distal-element connectivity statistics.
+\item \code{target_annotation} -- Target features (peaks) with gene assignments.
 Key columns include:
 \itemize{
 \item \code{All_Loop_Connected_Genes}: All genes from loop-connected anchors (P/G types).
@@ -87,17 +87,17 @@ with \code{Assigned_Target_Genes} or other columns.
 \strong{Read with} \code{Regulated_promoter_genes_Filled}; indicates
 which \code{*_Filled} column supplied the fallback gene.
 }
-\item \code{target_gene_links} — Long-format peak-gene provenance table.
+\item \code{target_gene_links} -- Long-format peak-gene provenance table.
 Each row records one peak-gene linkage with full provenance.
 \strong{Read} \code{evidence}, \code{anchor_role}, and \code{gene_role}
-\strong{together as a group} — they jointly describe how each gene was
+\strong{together as a group} -- they jointly describe how each gene was
 assigned to each peak; do not interpret any one column in isolation.
 \itemize{
 \item \code{input_id}, \code{loop_ID}, \code{anchor_id}: Identifiers.
 \item \code{gene}: Linked gene symbol.
 \item \code{gene_role}: \code{"promoter"}, \code{"gene_body"}, or \code{"linear_annotation"}.
 \item \code{source}: \code{"loop_anchor"} (3D-derived) or \code{"linear_annotation"} (nearest gene).
-\item \code{evidence}: Provenance label —
+\item \code{evidence}: Provenance label --
 \code{"local_promoter_overlap"} (peak overlaps anchor promoter),
 \code{"direct_opposite_promoter"} (opposite anchor is promoter),
 \code{"gene_body_context"} (gene body linkage),
@@ -115,8 +115,8 @@ this gene appears in. A gene may appear in multiple columns simultaneously.
 \item (Refine only) \code{Passes_Expression_Filter}: Logical. \code{TRUE} if
 \code{Mean_Expression >= threshold}.
 }
-\item \code{plots} — Named list of ggplot objects (dumbbell, rose, karyotype).
-\item \code{plot_list} — Backward-compatible alias of \code{plots}.
+\item \code{plots} -- Named list of ggplot objects (dumbbell, rose, karyotype).
+\item \code{plot_list} -- Backward-compatible alias of \code{plots}.
 }
 If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
 The workbook contains a \emph{Functional Loop Annotation} sheet with only
@@ -179,17 +179,17 @@ raw_annotation$promoter_centric_stats <- head(raw_annotation$promoter_centric_st
 raw_annotation$distal_element_stats <- head(raw_annotation$distal_element_stats, 6)
 
 res_reclassified <- refine_loop_anchors_by_expression(
-  annotation_res = raw_annotation,
-  expr_matrix_file = expr_path,
-  sample_columns = "con1",
-  threshold = 1.0,
-  unit_type = "TPM",
-  species = "hg38",
-  out_dir = tempdir(),
-  project_name = "Example_Reclassified",
-  reclassify_by_expression = TRUE,
-  write_output = FALSE,
-  quiet = TRUE
+    annotation_res = raw_annotation,
+    expr_matrix_file = expr_path,
+    sample_columns = "con1",
+    threshold = 1.0,
+    unit_type = "TPM",
+    species = "hg38",
+    out_dir = tempdir(),
+    project_name = "Example_Reclassified",
+    reclassify_by_expression = TRUE,
+    write_output = FALSE,
+    quiet = TRUE
 )
 print(table(res_reclassified$loop_annotation$loop_type))
 }

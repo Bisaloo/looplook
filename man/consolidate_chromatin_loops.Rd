@@ -12,6 +12,7 @@ consolidate_chromatin_loops(
   score_col = NULL,
   min_raw_score = NULL,
   min_score = NULL,
+  chaining_policy = c("warn", "none", "drop", "error"),
   blacklist_species = NULL,
   region_of_interest = NULL,
   roi_mode = c("any", "both"),
@@ -36,7 +37,7 @@ consolidate_chromatin_loops(
 (only effective when \code{mode = "consensus"}).
 If \code{NULL} (default), the threshold is automatically calculated:
 \itemize{
-\item For 2–3 replicates: Requires all (100\\%).
+\item For 2-3 replicates: Requires all (100\\%).
 \item For \eqn{N \ge 4}: Requires \eqn{\lfloor 0.75N \rfloor + 1}
 (e.g., 3 for N=4, 4 for N=5, 7 for N=8).
 }}
@@ -57,6 +58,14 @@ If \code{NULL} (default), auto-detection is used (see \code{\link{bedpe_to_gi}})
 \item For \code{"intersect"} mode, this filters the retained File 1 loops by their original score.
 \item Default: \code{NULL} (no post-filtering).
 }}
+
+\item{chaining_policy}{Character. Controls behaviour when connected-component
+chaining produces clusters with span exceeding the chaining threshold
+(\code{max(3xgap, 5xmedian_anchor_width)}).
+\code{"warn"} (default): emit a warning and retain all clusters.
+\code{"none"}: silently accept all clusters.
+\code{"drop"}: remove clusters exceeding the threshold.
+\code{"error"}: stop with an error.}
 
 \item{blacklist_species}{Character. Species/build for built-in blacklist
 (e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.}
@@ -82,6 +91,7 @@ A filtered \code{\link[InteractionSet]{GInteractions}} object with metadata colu
 \item{\code{n_members}}{Number of raw loops merged into this entry
 (1 for intersect mode where no coordinate merging occurs).}
 \item{\code{n_reps}}{Number of input files that support this entry.}
+\item{\code{cluster_id}}{Connected-component cluster identifier.}
 }
 When \code{write_output = TRUE} and \code{out_file} is provided, an extended
 BEDPE file is written with the additional columns \code{n_members} and
@@ -97,16 +107,19 @@ This function consolidates chromatin loops from multiple BEDPE files. It is desi
 The function supports three modes:
 \itemize{
 \item \code{"consensus"}: Implements graph-based connected component analysis to cluster spatially proximal anchors across samples. Only retains clusters detected in >= min_consensus biological replicates.
-\item \code{"intersect"}: Enforces strict reference-based filtering, retaining loops that show full genomic overlap with the reference file (File 1).
+\item \code{"intersect"}: Reference-based filtering. Retains loops in File 1 whose anchors overlap with loops in every other file within the specified \code{gap} tolerance. Coordinates and scores are inherited from File 1 without merging.
 \item \code{"union"}: Retains all chromatin interactions across the entire cohort, ideal for exploratory pan-tissue analyses.
 }
 
 \strong{Connected-component chaining}: Graph-based clustering may
-transitively chain loci (A–B and B–C merge, pulling A and C into the same
-cluster even if they are far apart). Inspect \code{n_members} in the
-output and reduce \code{gap} if clusters appear inflated.
+transitively chain loci (A-B and B-C merge, pulling A and C into the same
+cluster even if they are far apart). By default, a warning is emitted when
+any cluster span exceeds the chaining threshold
+(\code{max(3xgap, 5xmedian_anchor_width)}). Use \code{chaining_policy} to
+control this behavior (\code{"warn"}, \code{"none"}, \code{"drop"}, or
+\code{"error"}).
 
-It also supports a \strong{two-stage filtering strategy} to maximize signal-to-noise ratio:
+It also supports a \strong{two-stage filtering strategy} to improve signal-to-noise ratio:
 \itemize{
 \item \strong{Pre-filtering} (\code{min_raw_score}): Removes low-confidence noise (e.g., singleton reads) from raw files \emph{before} merging.
 \item \strong{Post-filtering} (\code{min_score}): Filters the final consensus loops based on their aggregated score.
@@ -122,28 +135,28 @@ f2 <- system.file("extdata", "example_loops_2.bedpe", package = "looplook")
 # Example A: Intersect Mode
 # Only keeps loops present in f1 that are also supported by f2
 res_intersect <- consolidate_chromatin_loops(
-  files = c(f1, f2),
-  mode = "intersect",
-  gap = 1000,
-  out_file = tempfile(fileext = ".bedpe")
+    files = c(f1, f2),
+    mode = "intersect",
+    gap = 1000,
+    out_file = tempfile(fileext = ".bedpe")
 )
 
 # Example B: Consensus Mode (formerly Reproducible)
 # Finds consensus loops supported by both replicates (default for N=2)
 res_consensus <- consolidate_chromatin_loops(
-  files = c(f1, f2),
-  mode = "consensus",
-  gap = 1000,
-  out_file = tempfile(fileext = ".bedpe")
+    files = c(f1, f2),
+    mode = "consensus",
+    gap = 1000,
+    out_file = tempfile(fileext = ".bedpe")
 )
 
 # Example C: Union Mode
 # Merges all loops into a single map
 res_union <- consolidate_chromatin_loops(
-  files = c(f1, f2),
-  mode = "union",
-  gap = 1000,
-  out_file = tempfile(fileext = ".bedpe")
+    files = c(f1, f2),
+    mode = "union",
+    gap = 1000,
+    out_file = tempfile(fileext = ".bedpe")
 )
 
 # Example D: Dual Filtering Strategy (Recommended for HiChIP)
@@ -151,12 +164,12 @@ res_union <- consolidate_chromatin_loops(
 # 2. Merge: Find loops present in both replicates.
 # 3. Post-filter: Keep only strong consensus loops (score > 5).
 res_clean <- consolidate_chromatin_loops(
-  files = c(f1, f2),
-  mode = "consensus",
-  min_raw_score = 2, # Pre-filter (remove noise)
-  min_score = 5, # Post-filter (keep strong loops)
-  gap = 1000,
-  out_file = tempfile(fileext = ".bedpe")
+    files = c(f1, f2),
+    mode = "consensus",
+    min_raw_score = 2, # Pre-filter (remove noise)
+    min_score = 5, # Post-filter (keep strong loops)
+    gap = 1000,
+    out_file = tempfile(fileext = ".bedpe")
 )
 
 # Inspect results

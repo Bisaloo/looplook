@@ -30,7 +30,8 @@ profile_target_genes(
   gsea_nSample = 99999,
   cnet_nSample = 50,
   stat_test = "wilcox.test",
-  cor_method = "pearson"
+  cor_method = "pearson",
+  seed = NULL
 )
 }
 \arguments{
@@ -85,15 +86,20 @@ profile_target_genes(
 \item{stat_test}{Character. Statistical test for LFC comparisons.}
 
 \item{cor_method}{Character. Method for sample correlation matrices.}
+
+\item{seed}{Integer or NULL. Random seed for reproducible GSEA down-sampling
+and motif GC-matched background sampling. When \code{NULL} (default),
+the global RNG state is used; set to a positive integer for fully
+reproducible results. The seed is recorded in the result object as
+\code{attr(result, "seed")}.}
 }
 \value{
 An invisible nested list indexed by \code{target_source} (e.g., \code{"targets"}, \code{"loops"}).
 Each element contains:
 \describe{
-\item{\code{go_results}}{Data frame of GO enrichment results (if \code{run_go = TRUE}).}
+\item{\code{go_results}}{Named list of data frames (one per gene set) containing GO enrichment results (if \code{run_go = TRUE}).}
 \item{\code{target_gene_sets}}{Named list of character vectors containing target gene symbols.}
 \item{\code{plots}}{Named list of ggplot objects (LFC_Violin, GSEA, Heatmap, Scatter, GO_Network, PPI_Network, etc.).}
-\item{\code{warnings}}{Character vector of warnings encountered during analysis.}
 }
 }
 \description{
@@ -106,12 +112,17 @@ protein-protein interaction (PPI) network construction.
 \details{
 Two analysis steps use random sampling: GSEA target-gene down-sampling
 (controlled by \code{gsea_nSample}, via unweighted sampling without
-replacement to avoid enrichment bias) and motif background anchor sampling
+replacement to reduce enrichment bias) and motif background anchor sampling
 (GC-matched, limited to 2 000 background regions per contrast).
 GSEA tie-breaking for duplicate ranked values is deterministic
-(position-based offset). For fully reproducible results, call \code{set.seed()}
-before running this function. The \code{clusterProfiler::GSEA} call internally
-uses \code{seed = TRUE} and is not affected by the global RNG state.
+(position-based offset). For fully reproducible results, set the \code{seed}
+parameter.
+
+\strong{Exploratory modules:} The GO enrichment (\code{run_go}), motif scanning
+(\code{run_motif}), and PPI network (\code{run_ppi}) modules are
+\emph{research-grade} analyses that depend on external databases and algorithms.
+Results should be treated as hypothesis-generating and validated with
+independent experimental approaches. All three modules are disabled by default.
 }
 \note{
 If any downstream analysis module fails (e.g. due to missing optional
@@ -130,16 +141,16 @@ tmp <- new.env()
 load(rdata_path, envir = tmp)
 res <- tmp[[ls(tmp)[1]]]
 profile_res <- profile_target_genes(
-  annotation_res = res,
-  diff_file = diff_path,
-  expr_matrix_file = expr_path,
-  metadata_file = meta_path,
-  run_go = FALSE,
-  run_ppi = FALSE,
-  run_motif = FALSE,
-  heatmap_nSample = 20,
-  gsea_nSample = 20,
-  cnet_nSample = 5
+    annotation_res = res,
+    diff_file = diff_path,
+    expr_matrix_file = expr_path,
+    metadata_file = meta_path,
+    run_go = FALSE,
+    run_ppi = FALSE,
+    run_motif = FALSE,
+    heatmap_nSample = 20,
+    gsea_nSample = 20,
+    cnet_nSample = 5
 )
 names(profile_res)
 

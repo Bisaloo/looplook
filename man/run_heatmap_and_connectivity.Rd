@@ -2,7 +2,7 @@
 % Please edit documentation in R/analysis.R
 \name{run_heatmap_and_connectivity}
 \alias{run_heatmap_and_connectivity}
-\title{Generate Expression Heatmap and Connectivity Raincloud Plots}
+\title{Generate Expression Heatmap and Connectivity Plots}
 \usage{
 run_heatmap_and_connectivity(
   target_genes,
@@ -19,9 +19,9 @@ run_heatmap_and_connectivity(
 )
 }
 \value{
-A named list of plot objects (Heatmap, Raincloud, Scatter).
+A named list of plot objects (Heatmap, Scatter, Raincloud_LFC, Raincloud_Expr).
 }
 \description{
-Generate Expression Heatmap and Connectivity Raincloud Plots
+Generate Expression Heatmap and Connectivity Plots
 }
 \keyword{internal}

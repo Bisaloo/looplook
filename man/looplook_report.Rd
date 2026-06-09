@@ -43,6 +43,7 @@ looplook_report(
   precomputed_res = NULL,
   output_file = NULL,
   quiet = FALSE,
+  seed = NULL,
   ...
 )
 }
@@ -69,7 +70,7 @@ looplook_report(
 
 \item{tss_region}{Numeric vector of length 2. TSS flanking region in bp. Default \code{c(-2000, 2000)}.}
 
-\item{neighbor_hop}{Integer. Neighbourhood extension for fragment overlap. Default \code{0}.}
+\item{neighbor_hop}{Integer. k-hop ego-network expansion order for loop connectivity analysis. Default \code{0}.}
 
 \item{hub_percentile}{Numeric. Quantile threshold for hub classification. Default \code{0.95}.}
 
@@ -125,6 +126,9 @@ When provided, annotation is skipped and refinement starts from this object.}
 
 \item{quiet}{Logical. Suppress rendering output. Default \code{FALSE}.}
 
+\item{seed}{Integer or NULL. Passed to \code{\link{profile_target_genes}} for
+reproducible GSEA and motif sampling. Default \code{NULL}.}
+
 \item{...}{Additional arguments passed to \code{rmarkdown::render}.}
 }
 \value{
@@ -143,25 +147,25 @@ results.
 }
 \examples{
 if (requireNamespace("rmarkdown", quietly = TRUE) &&
-  requireNamespace("knitr", quietly = TRUE)) {
-  temp_env <- new.env()
-  load(system.file("extdata", "analysis_results.RData", package = "looplook"), envir = temp_env)
-  precomputed_res <- temp_env[[ls(temp_env)[1]]]
-  precomputed_res$loop_annotation <- head(precomputed_res$loop_annotation, 6)
-  precomputed_res$target_annotation <- head(precomputed_res$target_annotation, 3)
-  precomputed_res$promoter_centric_stats <- head(precomputed_res$promoter_centric_stats, 6)
-  precomputed_res$distal_element_stats <- head(precomputed_res$distal_element_stats, 6)
+    requireNamespace("knitr", quietly = TRUE)) {
+    temp_env <- new.env()
+    load(system.file("extdata", "analysis_results.RData", package = "looplook"), envir = temp_env)
+    precomputed_res <- temp_env[[ls(temp_env)[1]]]
+    precomputed_res$loop_annotation <- head(precomputed_res$loop_annotation, 6)
+    precomputed_res$target_annotation <- head(precomputed_res$target_annotation, 3)
+    precomputed_res$promoter_centric_stats <- head(precomputed_res$promoter_centric_stats, 6)
+    precomputed_res$distal_element_stats <- head(precomputed_res$distal_element_stats, 6)
 
-  report_path <- looplook_report(
-    precomputed_res = precomputed_res,
-    project_name = "Example",
-    out_dir = tempdir(),
-    output_file = "looplook-example-report.html",
-    quiet = TRUE,
-    run_go = FALSE,
-    run_ppi = FALSE,
-    run_motif = FALSE
-  )
-  file.exists(report_path)
+    report_path <- looplook_report(
+        precomputed_res = precomputed_res,
+        project_name = "Example",
+        out_dir = tempdir(),
+        output_file = "looplook-example-report.html",
+        quiet = TRUE,
+        run_go = FALSE,
+        run_ppi = FALSE,
+        run_motif = FALSE
+    )
+    file.exists(report_path)
 }
 }

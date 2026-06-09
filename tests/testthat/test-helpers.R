@@ -450,3 +450,48 @@ test_that("resolve_gene_conflicts: biotype_first retains silent protein-coding o
   )
   expect_true(nrow(result_ef) >= 1)
 })
+
+# --- .filter_target_anchor_overlaps ---
+test_that(".filter_target_anchor_overlaps filters targets overlapping anchors", {
+  target <- GenomicRanges::GRanges(
+    seqnames = c("chr1", "chr1"),
+    ranges = IRanges::IRanges(start = c(1, 1), end = c(100, 1000))
+  )
+  anchors <- GenomicRanges::GRanges(
+    seqnames = c("chr1", "chr1", "chr1"),
+    ranges = IRanges::IRanges(
+      start = c(90, 900, 995),
+      end   = c(189, 999, 1094)
+    )
+  )
+  res <- looplook:::.filter_target_anchor_overlaps(target, anchors)
+  expect_s4_class(res, "GRanges")
+  expect_equal(length(res), 2L)
+})
+
+test_that(".filter_target_anchor_overlaps applies min_overlap threshold", {
+  target <- GenomicRanges::GRanges(
+    seqnames = c("chr1", "chr1"),
+    ranges = IRanges::IRanges(start = c(1, 1), end = c(100, 1000))
+  )
+  anchors <- GenomicRanges::GRanges(
+    seqnames = c("chr1", "chr1", "chr1"),
+    ranges = IRanges::IRanges(
+      start = c(90, 900, 995),
+      end   = c(189, 999, 1094)
+    )
+  )
+  res <- looplook:::.filter_target_anchor_overlaps(target, anchors,
+                                                     min_overlap = 2L)
+  expect_equal(length(res), 1L)  # only [1,1000] overlaps >=2 anchors
+})
+
+test_that(".filter_target_anchor_overlaps handles empty input", {
+  empty <- GenomicRanges::GRanges()
+  anchors <- GenomicRanges::GRanges(
+    seqnames = "chr1",
+    ranges = IRanges::IRanges(start = 1, end = 100)
+  )
+  res <- looplook:::.filter_target_anchor_overlaps(empty, anchors)
+  expect_equal(length(res), 0L)
+})
