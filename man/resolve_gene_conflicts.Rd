@@ -11,7 +11,8 @@ resolve_gene_conflicts(
   tss_region,
   gene_expr_map,
   min_expr = 0,
-  conflict_strategy = c("biotype_first", "expression_first")
+  conflict_strategy = c("biotype_first", "expression_first"),
+  co_dominance_ratio = 0.1
 )
 }
 \arguments{
@@ -34,7 +35,7 @@ considered active during conflict resolution. Default: \code{0}.}
 \item{conflict_strategy}{Character. Conflict resolution order.
 \code{"biotype_first"} (default): select the best biotype tier first,
 then apply expression filtering within that tier. This is the more
-conservative default — a silent protein-coding gene is preferred over
+conservative default -- a silent protein-coding gene is preferred over
 a highly expressed lncRNA at the same locus.
 \code{"expression_first"}: apply expression filtering across all
 biotypes first, then pick the best biotype among expressed candidates.}

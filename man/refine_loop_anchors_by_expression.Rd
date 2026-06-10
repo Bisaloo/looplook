@@ -17,6 +17,7 @@ refine_loop_anchors_by_expression(
   karyo_bin_size = 1e+05,
   reclassify_by_expression = TRUE,
   hub_percentile = 0.95,
+  chromatin_beds = list(),
   write_output = TRUE,
   quiet = FALSE
 )
@@ -32,7 +33,7 @@ refine_loop_anchors_by_expression(
 
 \item{unit_type}{Character. Expression unit for plot labels (e.g., \code{"TPM"}). Default: \code{"TPM"}.}
 
-\item{species}{Character. Genome assembly. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.}
+\item{species}{Character. Genome assembly. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}. Extensible to other species via \code{species_txdb_pkg()} and related helpers.}
 
 \item{out_dir}{Character. Output directory for the Excel results file. Default: \code{"./results/filtered"}.}
 
@@ -45,6 +46,11 @@ refine_loop_anchors_by_expression(
 \item{reclassify_by_expression}{Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.}
 
 \item{hub_percentile}{Numeric (0-1). Node-degree quantile for hub detection. Default: \code{0.95}.}
+
+\item{chromatin_beds}{Named list of BED file paths for orthogonal chromatin
+mark validation of eP/eG anchors. When non-empty, a \emph{Chromatin
+Validation} sheet is added to the Excel workbook (see
+\code{\link{validate_epeG_by_chromatin}}). Default: \code{list()} (skip).}
 
 \item{write_output}{Logical. If \code{TRUE} (default), write the refined Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
 
@@ -115,12 +121,18 @@ this gene appears in. A gene may appear in multiple columns simultaneously.
 \item (Refine only) \code{Passes_Expression_Filter}: Logical. \code{TRUE} if
 \code{Mean_Expression >= threshold}.
 }
+\item \code{chromatin_validation} -- Data frame from
+\code{\link{validate_epeG_by_chromatin}} with confidence levels and
+evidence strings for each eP/eG anchor. \code{NULL} when
+\code{chromatin_beds} is empty.
 \item \code{plots} -- Named list of ggplot objects (dumbbell, rose, karyotype).
 \item \code{plot_list} -- Backward-compatible alias of \code{plots}.
+\item \code{metadata} -- Internal metadata list (parameters, versions, database versions). Not intended for direct use.
 }
 If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
-The workbook contains a \emph{Functional Loop Annotation} sheet with only
-loops where \code{Retained_In_Functional_Network == TRUE}.
+The workbook contains a \emph{Chromatin Validation} sheet (when
+\code{chromatin_beds} is provided) and a \emph{Functional Loop Annotation}
+sheet with only loops where \code{Retained_In_Functional_Network == TRUE}.
 }
 \description{
 Integrates quantitative RNA-seq data (e.g., TPM/FPKM) with 3D structural data
@@ -133,7 +145,7 @@ loops belong to the high-confidence active subset.
 \strong{Algorithmic Framework:}
 \itemize{
 \item \strong{Target Filtration:} Parses merged gene assignments (e.g., \code{"GeneA;GeneB"}), evaluates individual genes against a defined expression threshold, and retains only transcriptionally active targets.
-\item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as enhancer-like regulatory elements (\code{eP}, \code{eG}). This adjusts the regulatory syntax to reflect functional states (e.g., reannotating a silent \code{P-P} loop to an \code{eP-P} interaction).
+\item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as \emph{expression-filtered silent} regulatory elements (\code{eP}, \code{eG}). \strong{Important:} \code{eP}/\code{eG} labels indicate transcriptional silence at the reference gene -- they do \strong{not} constitute evidence of enhancer activity. Orthogonal chromatin data (ATAC-seq, H3K27ac, H3K4me1) are required for functional enhancer interpretation. The labels are retained for backward compatibility; interpret them as "inactive-P" / "inactive-G" rather than "enhancer-P" / "enhancer-G".
 \item \strong{Expression-Aware Connectivity Statistics:} Recomputes promoter-centric and distal-element connectivity after expression-aware anchor refinement, while preserving all structural loops in the refined loop annotation. This separates the complete physical contact map from the high-confidence active subset.
 \item \strong{External Target Refinement:} Filters auxiliary target mapping columns (e.g., \code{Assigned_Target_Genes_Filled}) based on expression criteria, ensuring that mapped 1D genomic features are exclusively linked to active genes.
 \item \strong{Target Provenance Preservation:} Recomputes \code{*_Filled}
@@ -155,14 +167,15 @@ high-confidence functional subset is provided via
 Excel sheet.
 
 \strong{Interpretation of eP/eG labels:}
-The \code{eP} and \code{eG} labels capture expression-aware enhancer-like
-regulatory states, enabling \code{looplook} to distinguish transcriptionally
-silent reference promoters or gene bodies from putative regulatory anchors in
-3D chromatin space. Orthogonal chromatin evidence, including ATAC-seq
-accessibility, H3K27ac enrichment, or H3K27me3 depletion, can further
-strengthen biological interpretation when available. Users holding matched
-ATAC-seq or ChIP-seq data may overlay eP/eG loci with these tracks to
-confirm residual regulatory activity at transcriptionally silent promoters.
+\code{eP} and \code{eG} are \strong{expression-filtered silent states}, not
+functional enhancer classifications. Bulk RNA-seq silence can arise from
+cell-type proportions, time-point effects, sequencing depth, or promoter
+pausing -- none of which imply the locus has gained enhancer activity.
+These labels should be read as "transcriptionally inactive P/G" and
+treated as hypotheses requiring orthogonal validation (ATAC-seq, H3K27ac,
+H3K4me1, or H3K27me3 depletion). Users with matched chromatin data should
+overlay eP/eG loci against these tracks before interpreting them as
+putative regulatory elements.
 }
 \examples{
 # 1. Get paths to the required example files in the package

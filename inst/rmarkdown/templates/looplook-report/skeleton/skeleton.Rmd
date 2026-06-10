@@ -46,6 +46,7 @@ params:
   lfc_col: "log2FoldChange"
   metadata_file: null
   precomputed_res: null
+  chromatin_beds: !r list()
   seed: null
 ---
 
@@ -482,6 +483,7 @@ if (has_expr) {
       reclassify_by_expression = params$reclassify_by_expression,
       color_palette = params$color_palette,
       karyo_bin_size = params$karyo_bin_size,
+      chromatin_beds = params$chromatin_beds,
       out_dir = params$out_dir,
       project_name = params$project_name
     ),
@@ -748,6 +750,73 @@ if (!is.null(plot_descriptions[["Target_Sankey"]])) {
 }
 # iframe src is relative to the main report HTML; both live in out_dir
 cat(sprintf('<div class="plot-container"><iframe src="target_sankey.html" width="100%%" height="450" frameborder="0" style="border:none;"></iframe></div>\n'))
+```
+
+# Orthogonal Chromatin Validation {.section-header}
+
+```{r chromatin-validation, results='asis', eval=has_expr && !is.null(refined) && !is.null(refined$chromatin_validation) && nrow(refined$chromatin_validation) > 0}
+cv <- refined$chromatin_validation
+cv_tab <- table(cv$confidence)
+cv_levels <- c("gold_standard", "high_confidence", "supported", "weak", "uncertain")
+cv_colors <- c("gold_standard"="#1B5E20", "high_confidence"="#2E7D32", "supported"="#66BB6A",
+               "weak"="#FFB300", "uncertain"="#BDBDBD")
+cv_counts <- sapply(cv_levels, function(l) if (l %in% names(cv_tab)) cv_tab[[l]] else 0L)
+cv_has_data <- sum(cv_counts) > 0
+
+cat("## Chromatin Mark Validation of eP/eG Anchors\n\n")
+
+if (cv_has_data) {
+  cat(sprintf("<strong>Summary:</strong> %s eP/eG anchors validated across %s chromatin marks.\n\n",
+      comma(nrow(cv)), comma(length(unique(grep("^H3K|^ATAC", colnames(cv), value=TRUE))))))
+
+  cat("| Confidence | Anchors | Evidence |\n")
+  cat("|------------|---------|----------|\n")
+  for (lvl in cv_levels) {
+    if (cv_counts[lvl] > 0) {
+      pct <- round(cv_counts[lvl] / nrow(cv) * 100, 1)
+      desc <- switch(lvl,
+        gold_standard = "All 5 marks aligned: H3K4me1+, H3K27ac+, ATAC+, H3K27me3-, H3K4me3-",
+        high_confidence = "H3K4me1+ and (H3K27ac+ or ATAC+)",
+        supported = "At least one active mark positive",
+        weak = "No active marks; H3K27me3/H3K4me3 tested and absent",
+        uncertain = "No chromatin data or no overlaps")
+      cat(sprintf("| <span style='color:%s'>**%s**</span> | <strong>%s</strong> (%s%%) | %s |\n",
+          cv_colors[lvl], lvl, comma(cv_counts[lvl]), pct, desc))
+    }
+  }
+  cat("\n")
+
+  # Bar chart of confidence distribution
+  cv_plot_df <- data.frame(
+    Confidence = factor(names(cv_counts), levels = cv_levels),
+    Count = as.integer(cv_counts),
+    stringsAsFactors = FALSE
+  )
+  cv_plot_df <- cv_plot_df[cv_plot_df$Count > 0, , drop = FALSE]
+  if (nrow(cv_plot_df) > 0) {
+    p <- ggplot2::ggplot(cv_plot_df, ggplot2::aes(x = Confidence, y = Count, fill = Confidence)) +
+      ggplot2::geom_col(width = 0.7) +
+      ggplot2::scale_fill_manual(values = cv_colors) +
+      ggplot2::labs(title = "eP/eG Chromatin Validation",
+                    subtitle = "Confidence distribution based on ENCODE active-enhancer criteria",
+                    x = NULL, y = "Number of Anchors") +
+      ggplot2::theme_minimal() +
+      ggplot2::theme(legend.position = "none",
+                     plot.title = ggplot2::element_text(face = "bold", hjust = 0.5),
+                     plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 10))
+    cat("\n")
+    render_plot_container(p,
+      title = "Chromatin Validation Confidence",
+      description = "Confidence levels are based on ENCODE active-enhancer criteria. Gold standard requires all 5 marks aligned. High confidence requires H3K4me1 plus H3K27ac or ATAC.")
+  }
+  cat("\n")
+} else {
+  cat("<div class='status-box status-warning'>")
+  cat("<strong>Note:</strong> Chromatin validation was run but no eP/eG anchors were found. ")
+  cat("This may indicate that no P/G anchors were reclassified, or that the chromatin mark BEDs ")
+  cat("did not overlap any eP/eG anchors.")
+  cat("</div>\n")
+}
 ```
 
 # Functional Profiling {.section-header}

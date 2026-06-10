@@ -28,7 +28,7 @@
 #' @param expr_matrix_file Character. Path to the normalized expression matrix.
 #' @param metadata_file Character. Path to the sample metadata file.
 #' @param target_source Character vector. Source of target genes to analyze.
-#' @param target_mapping_mode Character. Specifies the mapping strategy for target genes.
+#' @param target_mapping_mode Character. Mapping strategy: \code{"all"} (any anchor-gene connection) or \code{"promoter"} (require direct promoter contact).
 #' @param loop_types Character vector. The specific loop types to analyze.
 #' @param include_Filled Logical. If \code{TRUE}, utilizes the comprehensively merged gene assignment.
 #' @param use_nearest_gene Logical. If \code{TRUE}, bypasses 3D loop-based gene assignment.
@@ -60,6 +60,7 @@
 #'     \item{\code{go_results}}{Named list of data frames (one per gene set) containing GO enrichment results (if \code{run_go = TRUE}).}
 #'     \item{\code{target_gene_sets}}{Named list of character vectors containing target gene symbols.}
 #'     \item{\code{plots}}{Named list of ggplot objects (LFC_Violin, GSEA, Heatmap, Scatter, GO_Network, PPI_Network, etc.).}
+#'     \item{\code{warnings}}{Character vector of module-level warnings (e.g., "[GO] failed: ..."). Empty if all modules succeeded.}
 #'   }
 #'
 #' @note If any downstream analysis module fails (e.g. due to missing optional
@@ -125,25 +126,16 @@ profile_target_genes <- function(
     target_mapping_mode <- match.arg(target_mapping_mode)
     genome_id <- match.arg(genome_id, c("hg38", "hg19", "mm10", "mm9"))
 
-    # Seed management: save RNG state, set seed if provided, record for output
-    if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-        old_seed <- get(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
-    } else {
-        old_seed <- NULL
-    }
+    # Seed management: withr::local_seed provides a local RNG context
+    # without leaking .Random.seed into the global environment.
     if (!is.null(seed)) {
         if (!is.numeric(seed) || length(seed) != 1L || is.na(seed) ||
             seed != as.integer(seed) || seed < 1L) {
             stop("`seed` must be a single positive integer or NULL.", call. = FALSE)
         }
-        set.seed(seed)
+        withr::local_seed(seed)
     }
     used_seed <- if (!is.null(seed)) seed else NULL
-    on.exit({
-        if (!is.null(old_seed)) {
-            assign(".Random.seed", old_seed, envir = .GlobalEnv)
-        }
-    }, add = TRUE)
 
     root_project_name <- project_name
     if (use_nearest_gene && "targets" %in% target_source) {
@@ -151,10 +143,6 @@ profile_target_genes <- function(
     } else if ("targets" %in% target_source) {
         if (target_mapping_mode == "promoter") root_project_name <- paste0(root_project_name, "_Promoter")
         if (!include_Filled) root_project_name <- paste0(root_project_name, "_LoopOnly")
-    }
-
-    if (!exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
-        runif(1) # initialise RNG state without set.seed (BiocCheck compliance)
     }
 
     message(">>> Analysis Init | Root Project: ", root_project_name)
@@ -348,18 +336,21 @@ extract_target_gene_sets <- function(annotation_res, src, active_loop_types = NU
 ) {
     go_results <- list()
     plots <- list()
-    module_warnings <- character()
+    warn_env <- new.env(parent = emptyenv())
+    warn_env$warnings <- character()
 
     .safe_run <- function(module_name, expr) {
-        tryCatch(
-            expr,
+        out <- tryCatch(
+            list(result = expr, warning = NULL),
             error = function(e) {
                 w_msg <- paste0("[", module_name, "] failed: ", conditionMessage(e))
                 warning(w_msg, call. = FALSE)
-                module_warnings <<- c(module_warnings, w_msg)
-                return(NULL)
+                list(result = NULL, warning = w_msg)
             }
         )
+        if (!is.null(out$warning))
+            warn_env$warnings <- c(warn_env$warnings, out$warning)
+        out$result
     }
 
     for (task_name in names(analysis_queue)) {
@@ -479,12 +470,13 @@ extract_target_gene_sets <- function(annotation_res, src, active_loop_types = NU
     }
 
     list(analysis_queue = analysis_queue, go_results = go_results, plots = plots,
-         warnings = module_warnings)
+         warnings = warn_env$warnings)
 }
 
 #' @title Generate LFC Violin and Boxplot
 #' @return A \code{ggplot} object, or \code{NULL} if fewer than 3 valid targets.
 #' @keywords internal
+#' @noRd
 run_lfc_violin <- function(target_genes, global_glist, stat_test = c("wilcox.test", "t.test"), project_name) {
     stat_test <- match.arg(stat_test)
     valid_targets <- intersect(target_genes, names(global_glist))
@@ -531,7 +523,8 @@ run_lfc_violin <- function(target_genes, global_glist, stat_test = c("wilcox.tes
 #' @title Run Custom Gene Set Enrichment Analysis (GSEA)
 #' @return A list with \code{result} (data frame) and \code{plot} (ggplot) elements.
 #' @keywords internal
-run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_proj_name) {
+#' @noRd
+run_gsea_analysis <- function(target_genes, global_glist, gsea_nSample, current_proj_name) {
     curr_glist <- global_glist
     if (any(duplicated(curr_glist))) {
         curr_glist <- curr_glist + seq_along(curr_glist) * 1e-12
@@ -554,8 +547,12 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
     curr_targets <- unique(upper_tg)
     curr_targets <- intersect(curr_targets, names(curr_glist))
 
-    if (!is.null(gsea_ntop) && length(curr_targets) > gsea_ntop) {
-        curr_targets <- sample(curr_targets, size = gsea_ntop, replace = FALSE)
+    if (!is.null(gsea_nSample) && length(curr_targets) > gsea_nSample) {
+        warning("GSEA: down-sampling ", gsea_nSample, " of ", length(curr_targets),
+                " target genes. GSEA results represent a random subset, ",
+                "not the full gene set. Set gsea_nSample = NULL for full analysis.",
+                call. = FALSE)
+        curr_targets <- sample(curr_targets, size = gsea_nSample, replace = FALSE)
     }
     if (length(curr_targets) < 2) {
         return(list(result = NULL, plot = NULL))
@@ -649,6 +646,7 @@ run_gsea_analysis <- function(target_genes, global_glist, gsea_ntop, current_pro
 #' @importFrom methods slot<-
 #' @return A list with \code{result} (data frame) and \code{plot} (ggplot) elements.
 #' @keywords internal
+#' @noRd
 run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, project_name = "Analysis") {
     clean_genes <- clean_gene_names(genes)
     org_db_obj <- .get_org_db_obj(org_db)
@@ -772,6 +770,7 @@ run_go_enrichment <- function(genes, org_db, universe_genes, cnet_nSample = 50, 
 #' @importFrom utils capture.output
 #' @return A \code{ggplot} object representing the PPI network, or \code{NULL} if no interactions found.
 #' @keywords internal
+#' @noRd
 run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_ntop, current_proj_name) {
     # Resolve STRING species ID from OrgDb package name (more robust than grepl)
     species_map <- c(
@@ -790,14 +789,19 @@ run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_
     }
     species_id <- species_map[[org_pkg_name]]
     if (is.null(species_id)) {
-        # Fallback: pattern-based detection for unrecognised OrgDbs
+        # Pattern-based detection for known-but-unlisted OrgDbs
         species_id <- if (grepl("\\.[Mm]m\\.", org_pkg_name)) 10090L
                       else if (grepl("\\.[Rr]n\\.", org_pkg_name)) 10116L
                       else if (grepl("\\.[Dd]m\\.", org_pkg_name)) 7227L
-                      else 9606L  # default to human
-        warning("Could not resolve STRING species ID for '", org_pkg_name,
-                "'; defaulting to ", species_id, ". ",
-                "If this is incorrect, set org_db to a recognised OrgDb package name.",
+                      else NULL
+        if (is.null(species_id)) {
+            stop("Could not resolve STRING species ID for OrgDb '", org_pkg_name,
+                 "'. PPI analysis requires a recognised OrgDb package name ",
+                 "(e.g. 'org.Hs.eg.db', 'org.Mm.eg.db').",
+                 call. = FALSE)
+        }
+        warning("Inferred STRING species ID ", species_id, " for '", org_pkg_name,
+                "'. If this is incorrect, verify the OrgDb package.",
                 call. = FALSE)
     }
 
@@ -969,9 +973,127 @@ plot_summary_go_lollipop <- function(all_go_results, base_project_name) {
     return(plot_list)
 }
 
+#' Internal: Build expression heatmap sub-plot
+#' @keywords internal
+#' @noRd
+.build_expression_heatmap <- function(target_genes, curr_mat, curr_meta,
+                                        heatmap_ntop, current_proj_name,
+                                        skip_heatmap) {
+    if (skip_heatmap) return(NULL)
+    expr_genes <- intersect(target_genes, rownames(curr_mat))
+    if (length(expr_genes) < 5) return(NULL)
+    mat_plot <- log2(curr_mat[expr_genes, , drop = FALSE] + 1)
+    if (!is.null(heatmap_ntop) && nrow(mat_plot) > heatmap_ntop) {
+        row_vars <- apply(mat_plot, 1, var, na.rm = TRUE)
+        mat_plot <- mat_plot[head(names(sort(row_vars, decreasing = TRUE)), heatmap_ntop), , drop = FALSE]
+    }
+    mat_scaled <- t(scale(t(mat_plot)))
+    mat_scaled[mat_scaled > 2] <- 2
+    mat_scaled[mat_scaled < -2] <- -2
+    mat_scaled[is.na(mat_scaled)] <- 0
+    col_fun <- circlize::colorRamp2(c(-2, 0, 2), c("#2BB2D1", "white", "#FF8181"))
+    groups <- unique(curr_meta$Group)
+    n_groups <- length(groups)
+    cols <- if (n_groups <= 8) RColorBrewer::brewer.pal(max(3, n_groups), "Set2")[seq_len(n_groups)]
+            else grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(n_groups)
+    ha <- ComplexHeatmap::HeatmapAnnotation(
+        Group = curr_meta$Group,
+        col = list(Group = setNames(cols, groups)),
+        simple_anno_size = unit(0.3, "cm")
+    )
+    ComplexHeatmap::Heatmap(mat_scaled, name = "Z-score", col = col_fun,
+        cluster_columns = FALSE, show_row_names = (nrow(mat_scaled) <= 80),
+        top_annotation = ha, border = TRUE,
+        column_title = paste0("Expression Heatmap\n", current_proj_name),
+        use_raster = FALSE)
+}
+
+#' Internal: Add raincloud plots to connectivity plot list
+#' @keywords internal
+#' @noRd
+.add_connectivity_rainclouds <- function(plot_df_rc, custom_colors, plots_list) {
+    if (nlevels(plot_df_rc$Conn_Group) <= 1) return(plots_list)
+    clean_theme <- ggplot2::theme_classic() + ggplot2::theme(
+        plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14),
+        plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 11, color = "black"),
+        legend.position = "none",
+        axis.text.x = ggplot2::element_text(angle = 20, hjust = 1, size = 10, color = "black"),
+        axis.text.y = ggplot2::element_text(size = 10, color = "black"),
+        axis.title.y = ggplot2::element_text(size = 12, face = "bold"),
+        axis.line = ggplot2::element_line(color = "black", linewidth = 0.6),
+        axis.ticks = ggplot2::element_line(color = "black"),
+        panel.grid = ggplot2::element_blank()
+    )
+    get_pval_str <- function(val_col) {
+        lvls <- levels(plot_df_rc$Conn_Group)
+        if (!"Others" %in% lvls) return("Wilcox P: NA (No 'Others' group)")
+        res <- character()
+        if ("High Distal" %in% lvls) {
+            p <- tryCatch(stats::wilcox.test(
+                plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Distal"],
+                plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"])$p.value,
+                error = function(e) NA_real_)
+            if (!is.na(p)) res <- c(res, paste0("Distal=", signif(p, 3), " (",
+                dplyr::case_when(p < 0.001 ~ "***", p < 0.01 ~ "**",
+                                 p < 0.05 ~ "*", TRUE ~ "ns"), ")"))
+        }
+        if ("High Total" %in% lvls) {
+            p <- tryCatch(stats::wilcox.test(
+                plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Total"],
+                plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"])$p.value,
+                error = function(e) NA_real_)
+            if (!is.na(p)) res <- c(res, paste0("Total=", signif(p, 3), " (",
+                dplyr::case_when(p < 0.001 ~ "***", p < 0.01 ~ "**",
+                                 p < 0.05 ~ "*", TRUE ~ "ns"), ")"))
+        }
+        if (length(res) == 0) return("Wilcox P: NA")
+        paste0("Wilcox P (vs Others):\n", paste(res, collapse = " | "))
+    }
+    base_box <- function(y_var, y_lab) {
+        ggplot2::ggplot(plot_df_rc, ggplot2::aes(fill = Conn_Group)) +
+            ggplot2::geom_jitter(ggplot2::aes(x = .data$Conn_Group_jitter,
+                y = .data[[y_var]], color = .data$Conn_Group),
+                shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
+            ggplot2::stat_boxplot(ggplot2::aes(x = .data$Conn_Group_num,
+                y = .data[[y_var]], color = .data$Conn_Group),
+                geom = "errorbar", width = 0.05, linewidth = 0.5) +
+            ggplot2::geom_boxplot(ggplot2::aes(x = .data$Conn_Group_num,
+                y = .data[[y_var]], color = .data$Conn_Group),
+                width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
+            ggplot2::stat_summary(ggplot2::aes(x = .data$Conn_Group_num,
+                y = .data[[y_var]]), fun = median, fun.min = median, fun.max = median,
+                geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
+            ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab,
+                y = .data[[y_var]], fill = .data$Conn_Group),
+                adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
+            ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab,
+                y = .data[[y_var]], color = .data$Conn_Group),
+                adjust = 0.5, width = 0.35, justification = 0,
+                fill = NA, alpha = 0.5, linewidth = 0.4) +
+            ggplot2::scale_x_continuous(
+                breaks = seq_along(levels(plot_df_rc$Conn_Group)),
+                labels = levels(plot_df_rc$Conn_Group)) +
+            ggplot2::coord_cartesian(
+                xlim = c(0.75, length(levels(plot_df_rc$Conn_Group)) + 0.6)) +
+            ggplot2::scale_fill_manual(values = custom_colors) +
+            ggplot2::scale_color_manual(values = custom_colors) +
+            ggplot2::labs(title = "Regulation: High_connectivity vs Others",
+                subtitle = get_pval_str(y_var), x = NULL, y = y_lab) +
+            clean_theme
+    }
+    if (requireNamespace("ggdist", quietly = TRUE)) {
+        plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") +
+            ggplot2::geom_hline(yintercept = 0, linetype = "dashed",
+                                color = "grey45", linewidth = 0.6)
+        plots_list$Raincloud_Expr <- base_box("Expression", "Log2(Mean Expression + 1)")
+    }
+    plots_list
+}
+
 #' @title Generate Expression Heatmap and Connectivity Plots
 #' @return A named list of plot objects (Heatmap, Scatter, Raincloud_LFC, Raincloud_Expr).
 #' @keywords internal
+#' @noRd
 run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, loop_stats_df, global_glist, heatmap_ntop, cor_method, current_proj_name, source_type, target_col = NULL, skip_heatmap = FALSE) {
     plots_list <- list()
     if (!skip_heatmap && (!requireNamespace("ComplexHeatmap", quietly = TRUE) ||
@@ -988,27 +1110,9 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
     curr_mat <- tpm_mat_raw[, valid_s, drop = FALSE]
     curr_meta <- meta_raw %>% dplyr::filter(SampleID %in% valid_s)
 
-    if (!skip_heatmap) {
-        expr_genes <- intersect(target_genes, rownames(curr_mat))
-        if (length(expr_genes) >= 5) {
-            mat_plot <- log2(curr_mat[expr_genes, , drop = FALSE] + 1)
-            if (!is.null(heatmap_ntop) && nrow(mat_plot) > heatmap_ntop) {
-                row_vars <- apply(mat_plot, 1, var, na.rm = TRUE)
-                mat_plot <- mat_plot[head(names(sort(row_vars, decreasing = TRUE)), heatmap_ntop), , drop = FALSE]
-            }
-            mat_scaled <- t(scale(t(mat_plot)))
-            mat_scaled[mat_scaled > 2] <- 2
-            mat_scaled[mat_scaled < -2] <- -2
-            mat_scaled[is.na(mat_scaled)] <- 0
-
-            col_fun <- circlize::colorRamp2(c(-2, 0, 2), c("#2BB2D1", "white", "#FF8181"))
-            groups <- unique(curr_meta$Group)
-            n_groups <- length(groups)
-            cols <- if (n_groups <= 8) RColorBrewer::brewer.pal(max(3, n_groups), "Set2")[seq_len(n_groups)] else grDevices::colorRampPalette(RColorBrewer::brewer.pal(8, "Set2"))(n_groups)
-            ha <- ComplexHeatmap::HeatmapAnnotation(Group = curr_meta$Group, col = list(Group = setNames(cols, groups)), simple_anno_size = unit(0.3, "cm"))
-            plots_list$Heatmap <- ComplexHeatmap::Heatmap(mat_scaled, name = "Z-score", col = col_fun, cluster_columns = FALSE, show_row_names = (nrow(mat_scaled) <= 80), top_annotation = ha, border = TRUE, column_title = paste0("Expression Heatmap\n", current_proj_name), use_raster = FALSE)
-        }
-    }
+    plots_list$Heatmap <- .build_expression_heatmap(
+        target_genes, curr_mat, curr_meta, heatmap_ntop, current_proj_name, skip_heatmap
+    )
 
     if (is.null(loop_stats_df)) {
         return(plots_list)
@@ -1105,79 +1209,9 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
             Conn_Group_slab = .data$Conn_Group_num + 0.07
         )
 
-    if (nlevels(plot_df_rc$Conn_Group) > 1) {
-        clean_theme <- ggplot2::theme_classic() + ggplot2::theme(plot.title = ggplot2::element_text(hjust = 0.5, face = "bold", size = 14), plot.subtitle = ggplot2::element_text(hjust = 0.5, size = 11, color = "black"), legend.position = "none", axis.text.x = ggplot2::element_text(angle = 20, hjust = 1, size = 10, color = "black"), axis.text.y = ggplot2::element_text(size = 10, color = "black"), axis.title.y = ggplot2::element_text(size = 12, face = "bold"), axis.line = ggplot2::element_line(color = "black", linewidth = 0.6), axis.ticks = ggplot2::element_line(color = "black"), panel.grid = ggplot2::element_blank())
-        get_pval_str <- function(val_col) {
-            lvls <- levels(plot_df_rc$Conn_Group)
-            if (!"Others" %in% lvls) {
-                return("Wilcox P: NA (No 'Others' group)")
-            }
-
-            res <- character()
-            if ("High Distal" %in% lvls) {
-                p <- tryCatch(
-                    stats::wilcox.test(
-                        plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Distal"],
-                        plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"]
-                    )$p.value,
-                    error = function(e) NA_real_
-                )
-                if (!is.na(p)) {
-                    s <- dplyr::case_when(
-                        p < 0.001 ~ "***",
-                        p < 0.01 ~ "**",
-                        p < 0.05 ~ "*",
-                        TRUE ~ "ns"
-                    )
-                    res <- c(res, paste0("Distal=", signif(p, 3), " (", s, ")"))
-                }
-            }
-
-            if ("High Total" %in% lvls) {
-                p <- tryCatch(
-                    stats::wilcox.test(
-                        plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "High Total"],
-                        plot_df_rc[[val_col]][plot_df_rc$Conn_Group == "Others"]
-                    )$p.value,
-                    error = function(e) NA_real_
-                )
-                if (!is.na(p)) {
-                    s <- dplyr::case_when(
-                        p < 0.001 ~ "***",
-                        p < 0.01 ~ "**",
-                        p < 0.05 ~ "*",
-                        TRUE ~ "ns"
-                    )
-                    res <- c(res, paste0("Total=", signif(p, 3), " (", s, ")"))
-                }
-            }
-
-            if (length(res) == 0) {
-                return("Wilcox P: NA")
-            }
-            paste0("Wilcox P (vs Others):\n", paste(res, collapse = " | "))
-        }
-
-        base_box <- function(y_var, y_lab) {
-            ggplot2::ggplot(plot_df_rc, ggplot2::aes(fill = Conn_Group)) +
-                ggplot2::geom_jitter(ggplot2::aes(x = .data$Conn_Group_jitter, y = .data[[y_var]], color = .data$Conn_Group), shape = 16, width = 0.03, height = 0, alpha = 0.6, size = 0.8) +
-                ggplot2::stat_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]], color = .data$Conn_Group), geom = "errorbar", width = 0.05, linewidth = 0.5) +
-                ggplot2::geom_boxplot(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]], color = .data$Conn_Group), width = 0.12, notch = TRUE, outlier.shape = NA, alpha = 1, linewidth = 0.5) +
-                ggplot2::stat_summary(ggplot2::aes(x = .data$Conn_Group_num, y = .data[[y_var]]), fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.1, color = "black", linewidth = 0.4) +
-                ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = .data[[y_var]], fill = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, alpha = 0.3, color = NA) +
-                ggdist::stat_slab(ggplot2::aes(x = .data$Conn_Group_slab, y = .data[[y_var]], color = .data$Conn_Group), adjust = 0.5, width = 0.35, justification = 0, fill = NA, alpha = 0.5, linewidth = 0.4) +
-                ggplot2::scale_x_continuous(breaks = seq_along(levels(plot_df_rc$Conn_Group)), labels = levels(plot_df_rc$Conn_Group)) +
-                ggplot2::coord_cartesian(xlim = c(0.75, length(levels(plot_df_rc$Conn_Group)) + 0.6)) +
-                ggplot2::scale_fill_manual(values = custom_colors) +
-                ggplot2::scale_color_manual(values = custom_colors) +
-                ggplot2::labs(title = "Regulation: High_connectivity vs Others", subtitle = get_pval_str(y_var), x = NULL, y = y_lab) +
-                clean_theme
-        }
-        if (requireNamespace("ggdist", quietly = TRUE)) {
-            plots_list$Raincloud_LFC <- base_box("LFC", "Log2 Fold Change (LFC)") + ggplot2::geom_hline(yintercept = 0, linetype = "dashed", color = "grey45", linewidth = 0.6)
-            plots_list$Raincloud_Expr <- base_box("Expression", "Log2(Mean Expression + 1)")
-        }
-    }
+    plots_list <- .add_connectivity_rainclouds(
+        plot_df_rc, custom_colors, plots_list
+    )
     return(plots_list)
 }
 
@@ -1446,8 +1480,11 @@ run_heatmap_and_connectivity <- function(target_genes, tpm_mat_raw, meta_raw, lo
 #' @title Run Dual Motif Analysis for Loop Anchors
 #' @param jaspar_db A JASPAR database object (e.g., \code{JASPAR2020::JASPAR2020} or \code{JASPAR2024::JASPAR2024}). Default: \code{NULL} (auto-resolves to \code{JASPAR2020::JASPAR2020} if installed).
 #' @param jaspar_collection Character. JASPAR collection to query (e.g., \code{"CORE"}, \code{"CNE"}). Default: \code{"CORE"}.
+#' @param motif_max_bg Integer passed to \code{\link{.sample_gc_matched_background}}. Default \code{2000L}.
+#' @param motif_gc_bins Integer. Number of GC-content bins for background matching. Default \code{5L}. Increase for regions with highly skewed GC content (e.g., CpG islands).
 #' @return A named list containing motif enrichment results and plot objects.
 #' @keywords internal
+#' @noRd
 run_distal_motif_analysis <- function(
   target_genes, loop_df, genome_id, pval_thresh,
   current_proj_name, top_n = 5, jaspar_db = NULL,
@@ -1561,6 +1598,14 @@ run_distal_motif_analysis <- function(
     }
     fg_gr <- GenomicRanges::resize(fg_gr[GenomicRanges::start(fg_gr) > 0], width = 500, fix = "center")
     bg_gr <- GenomicRanges::resize(bg_gr[GenomicRanges::start(bg_gr) > 0], width = 500, fix = "center")
+    # Trim to valid chromosome boundaries after resize.
+    # Resize(fix="center") may push anchors near chromosome edges beyond
+    # valid coordinates, causing BSgenome::getSeq() to fail.
+    sl <- GenomeInfoDb::seqinfo(genome_obj)
+    GenomeInfoDb::seqinfo(fg_gr) <- sl[GenomeInfoDb::seqlevels(fg_gr)]
+    fg_gr <- GenomicRanges::trim(fg_gr)
+    GenomeInfoDb::seqinfo(bg_gr) <- sl[GenomeInfoDb::seqlevels(bg_gr)]
+    bg_gr <- GenomicRanges::trim(bg_gr)
     bg_gr <- .sample_gc_matched_background(fg_gr, bg_gr, genome_obj, max_bg = max_bg, gc_bins = gc_bins)
     if (length(fg_gr) == 0 || length(bg_gr) == 0) {
         return(NULL)
@@ -1675,7 +1720,7 @@ run_distal_motif_analysis <- function(
 #' Render a Publication-Ready 3D Annotation Report
 #'
 #' One-click parameterised R Markdown report that executes the full looplook
-#' pipeline (annotation → refinement → profiling) and renders an
+#' pipeline (annotation -> refinement -> profiling) and renders an
 #' interpretation-ready HTML document suitable for sharing with collaborators.
 #'
 #' @details
@@ -1700,6 +1745,10 @@ run_distal_motif_analysis <- function(
 #' @param precomputed_res Optional. Either a \code{.RData} file path or an
 #'   in-memory list object returned by \code{annotate_peaks_and_loops}.
 #'   When provided, annotation is skipped and refinement starts from this object.
+#' @param chromatin_beds Named list of BED file paths for orthogonal chromatin
+#'   mark validation (passed to \code{\link{refine_loop_anchors_by_expression}}).
+#'   When non-empty, a \emph{Chromatin Validation} section appears in the report
+#'   with confidence-level distribution for eP/eG anchors. Default: \code{list()} (skip).
 #' @param unit_type Character. Expression unit label for plot annotations. Default \code{"TPM"}.
 #' @param tss_region Numeric vector of length 2. TSS flanking region in bp. Default \code{c(-2000, 2000)}.
 #' @param neighbor_hop Integer. k-hop ego-network expansion order for loop connectivity analysis. Default \code{0}.
@@ -1792,6 +1841,7 @@ looplook_report <- function(
   lfc_col = "log2FoldChange",
   metadata_file = NULL,
   precomputed_res = NULL,
+  chromatin_beds = list(),
   output_file = NULL,
   quiet = FALSE,
   seed = NULL,
@@ -1880,6 +1930,7 @@ looplook_report <- function(
             lfc_col = lfc_col,
             metadata_file = metadata_file,
             precomputed_res = precomputed_res,
+            chromatin_beds = chromatin_beds,
             seed = seed
         ),
         output_dir = out_dir,

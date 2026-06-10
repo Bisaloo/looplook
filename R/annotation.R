@@ -46,7 +46,7 @@
 #' does \strong{not} imply enhancer activity. Orthogonal evidence (ATAC-seq,
 #' H3K27ac, EP300) is required for functional enhancer classification.
 #' @return A single character: \code{"P"} (promoter), \code{"G"} (gene body),
-#'   \code{"E"} (distal/intergenic — positional, not functional enhancer),
+#'   \code{"E"} (distal/intergenic -- positional, not functional enhancer),
 #'   or \code{"Unknown"}.
 #' @keywords internal
 #' @noRd
@@ -70,7 +70,9 @@
         return("G")
     }
 
-    "E"  # distal positional default, not functional enhancer
+    "E"  # positional default for unrecognised annotation types;
+         # ChIPseeker changes to annotation strings could silently
+         # route novel types here.  Review after ChIPseeker upgrades.
 }
 
 #' Internal: Extract Loop Locus Genes
@@ -85,6 +87,10 @@
 }
 
 #' Internal: Build Loop Type Code
+#' @details Anchors are sorted alphabetically so that lowercase prefixes
+#'   (eP, eG) sort before uppercase (E, G, P).  This gives a canonical
+#'   ordering where expression-filtered anchors appear first (e.g. eP-P
+#'   rather than P-eP).
 #' @return A two-letter code string (e.g. \code{"E-P"}, \code{"P-P"}) with anchors sorted alphabetically, or \code{"Unknown"}.
 #' @keywords internal
 #' @noRd
@@ -149,7 +155,8 @@
   conflict_strategy,
   gr_anchors, anchor_topo_map, loop_annotation_final, map_info, ego_list_target,
   log_message,
-  anchor_gap = 0L, anchor_min_overlap = 1L, anchor_min_frac = 0
+  anchor_gap = -1L, anchor_min_overlap = 1L, anchor_min_frac = 0,
+  co_dominance_ratio = 0.1
 ) {
     bed_target <- read_robust_general(target_bed, min_cols = 3, desc = "Target BED")
     colnames(bed_target)[c(1, 2, 3)] <- c("chr", "start", "end")
@@ -175,17 +182,29 @@
     bed_info <- format_annotation_columns(as.data.frame(bed_annot))
     if ("GENENAME" %in% colnames(bed_info)) bed_info <- bed_info %>% dplyr::rename(Gene_description = GENENAME)
     log_message("    Refining Target annotation...")
-    bed_info <- resolve_gene_conflicts(bed_info, txdb_obj, org_db_pkg, tss_region, gene_expr_map, min_expr = min_expr, conflict_strategy = conflict_strategy)
+    bed_info <- resolve_gene_conflicts(bed_info, txdb_obj, org_db_pkg, tss_region, gene_expr_map, min_expr = min_expr, conflict_strategy = conflict_strategy, co_dominance_ratio = co_dominance_ratio)
     gr_bed <- .harmonize_seqlevels(gr_bed, gr_anchors, "target BED")
     n_peaks <- length(gr_bed)
     n_anchors <- length(gr_anchors)
 
-    hits <- GenomicRanges::findOverlaps(
-        gr_bed, gr_anchors,
-        maxgap = anchor_gap
-    )
+    # anchor_gap = -1L: use findOverlaps default (strict physical overlap).
+    # anchor_gap >= 0:  proximity-based matching -- intervals within `anchor_gap`
+    #   bp of each other are considered hits even without physical overlap.
+    #   This is the intended behavior for cross-experiment integration.
+    #   The pintersect post-filter only applies when anchor_min_overlap > 1L
+    #   (user explicitly requests a stricter bp-level filter).
+    if (anchor_gap >= 0L) {
+        hits <- GenomicRanges::findOverlaps(
+            gr_bed, gr_anchors,
+            maxgap = anchor_gap
+        )
+    } else {
+        hits <- GenomicRanges::findOverlaps(gr_bed, gr_anchors)
+    }
 
-    # Post-filter by absolute minimum overlap (avoids findOverlaps type="any" constraint)
+    # Post-filter by minimum physical overlap -- only when user explicitly
+    # requests stricter bp-level filtering. Proximity-only hits (no actual
+    # overlap but within anchor_gap) are NOT filtered here.
     n_hits_raw <- length(hits)
     if (anchor_min_overlap > 1L && n_hits_raw > 0) {
         q_gr <- gr_bed[S4Vectors::queryHits(hits)]
@@ -325,7 +344,7 @@
 #' @description
 #' A function for loop annotation and target mapping, designed to integrate 1D genomic features with 3D chromatin architecture.
 #' \enumerate{
-#'   \item \strong{Loop Annotation:} Classifies 3D spatial interactions (e.g., distal-to-promoter, promoter-to-promoter) using positional anchor labels relative to gene annotations. \strong{Important:} anchor type \code{"E"} denotes a \emph{positional} distal/intergenic classification — it does \strong{not} imply functional enhancer activity. Orthogonal chromatin data are required for functional interpretation.
+#'   \item \strong{Loop Annotation:} Classifies 3D spatial interactions (e.g., distal-to-promoter, promoter-to-promoter) using positional anchor labels relative to gene annotations. \strong{Important:} anchor type \code{"E"} denotes a \emph{positional} distal/intergenic classification -- it does \strong{not} imply functional enhancer activity. Orthogonal chromatin data are required for functional interpretation.
 #'   \item \strong{Feature-to-Target Mapping:} Links 1D genomic features (e.g., GWAS risk SNPs, ATAC-seq peaks, ChIP-seq binding sites) to putative target genes via 3D chromatin contacts, providing a loop-based alternative to linear proximity-based assignments.
 #' }
 #'
@@ -345,7 +364,7 @@
 #' \enumerate{
 #'   \item \emph{Biotype Prioritization:} Selects the highest-priority candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
 #'   \item \emph{Expression Filter:} Within the selected biotype tier, excludes transcriptionally silent genes using a user-provided expression matrix. If no gene in the tier is expressed, all candidates in that tier are retained.
-#'   \item \emph{Expression Tiebreaker:} Among remaining candidates of equal biotype priority, retains all genes whose expression is within one order of magnitude of the highest-expressing candidate (i.e., expression >= 10\% of the group maximum; in log2 space this corresponds to ~3.3-fold below the maximum). This co-dominant rule preserves functionally redundant candidates such as bidirectional promoter pairs, where co-expressed partners typically fall within 2-3 fold of each other. The 10\% threshold is not user-tunable; it reflects the conventional definition of co-expression within one order of magnitude.
+#'   \item \emph{Expression Tiebreaker:} Among remaining candidates of equal biotype priority, retains all genes whose expression >= \code{co_dominance_ratio} x the group maximum. Default \code{0.1} (one order of magnitude; ~3.3-fold in log2 space). This co-dominant rule preserves functionally redundant candidates such as bidirectional promoter pairs, where co-expressed partners typically fall within 2-3 fold of each other. Edge case: when all candidates in the best biotype tier have TPM = 0, all are retained (the tiebreaker cannot distinguish them), which may produce multi-gene assignments at transcriptionally silent loci.
 #' }
 #'
 #' \strong{Network Topology Analysis}
@@ -363,7 +382,7 @@
 #'   \item \code{anchor_min_overlap} -- requires a minimum physical overlap in bp.
 #'   \item \code{anchor_min_frac} -- requires the overlap to cover a minimum fraction of the peak.
 #' }
-#' The table below summarises recommended settings for common experimental designs.
+#' The table below lists suggested starting points for common experimental designs.
 #'
 #' \tabular{llll}{
 #'   \strong{Experimental design} \tab \code{anchor_gap} \tab \code{anchor_min_overlap} \tab \code{anchor_min_frac} \cr
@@ -384,8 +403,8 @@
 #' @param target_bed Optional path to a BED file of genomic features (e.g., ChIP-seq peaks, GWAS SNPs). When provided, these 1D regions are mapped to 3D target genes. Default: \code{NULL}.
 #' @param txdb A \code{\link[GenomicFeatures]{TxDb}} object, a package name string, or \code{NULL} to auto-resolve from \code{species}. Default: \code{NULL}.
 #' @param org_db An \code{OrgDb} object, a package name string, or \code{NULL} to auto-resolve from \code{species}. Default: \code{NULL}.
-#' @param species Character. Genome assembly used when \code{txdb} and \code{org_db} are \code{NULL}. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.
-#' @param tss_region Numeric vector of length 2. Promoter window around the TSS in bp. Default: \code{c(-2000, 2000)}.
+#' @param species Character. Genome assembly used when \code{txdb} and \code{org_db} are \code{NULL}. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}. The package is currently tested on human and mouse; the architecture supports extension to other species by adding entries to \code{species_txdb_pkg()}, \code{species_orgdb_pkg()}, and \code{species_bsgenome_pkg()}.
+#' @param tss_region Numeric vector of length 2. Promoter window around the TSS in bp. Default: \code{c(-2000, 2000)} (typical for mammalian protein-coding genes; may need widening for broad domains like HOX clusters, or narrowing for compact genomes).
 #' @param out_dir Character. Output directory for the Excel results file. Default: \code{"./results"}.
 #' @param expr_matrix_file Optional path to a normalised expression matrix (TPM/FPKM, genes x samples). Enables expression-aware conflict resolution. Default: \code{NULL}.
 #' @param sample_columns Character vector or integer indices. Columns in \code{expr_matrix_file} to average for baseline expression. Default: \code{NULL}.
@@ -403,13 +422,18 @@
 #'   the best biotype tier first, then apply expression filtering within that
 #'   tier. \code{"expression_first"}: apply expression filtering across all
 #'   biotypes first, then pick the best biotype among expressed candidates.
+#' @param co_dominance_ratio Numeric (0-1). In the expression tiebreaker step,
+#'   genes with expression >= \code{co_dominance_ratio x max(expression)} in the
+#'   group are retained together. Default: \code{0.1} (i.e. within one order of
+#'   magnitude). Lower values (e.g. \code{0.01}) retain more co-dominant
+#'   candidates; higher values (e.g. \code{0.5}) are more stringent.
 #' @param project_name Character. Prefix for output files and plot titles. Default: \code{"HiChIP"}.
 #' @param color_palette Character. RColorBrewer palette name. Default: \code{"Set2"}.
 #' @param karyo_bin_size Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.
 #' @param neighbor_hop Integer. k-hop ego-network expansion order via \code{igraph::ego()}. \code{0} restricts to direct contacts. Default: \code{0}. Target gene assignment searches one additional hop (\code{neighbor_hop + 1}) to capture genes at the opposite anchor of directly connected loops.
-#' @param anchor_gap Integer. Maximum gap (bp) allowed between a target peak and a loop anchor for them to be considered overlapping. \code{0} (default) requires physical contact -- appropriate when peaks and loops are called from the same experiment (e.g. HiChIP). Increase to 100-500 for cross-experiment integration (e.g. ATAC-seq peaks with HiChIP loops) where boundaries may differ slightly. See Details for a table of recommended settings.
-#' @param anchor_min_overlap Integer. Minimum overlap in base pairs required between a peak and an anchor. Default: \code{1L} (any 1 bp touch is sufficient). Increase to filter out spurious boundary-level overlaps (e.g. 10-100 bp for noisy data). Applied after \code{anchor_gap} as a post-filter on actual physical overlap. See Details for recommended settings.
-#' @param anchor_min_frac Numeric (0-1). Minimum overlap as a fraction of the \emph{peak} width. Default: \code{0} (any fractional overlap accepted). Set to \code{0.1-0.5} to require that a meaningful portion of the peak overlaps the anchor. Useful when peaks are broad (e.g. H3K27ac domains, 2-5 kb) and a 1 bp overlap would be artefactual. Not recommended for point features (SNPs, eQTLs). Applied after the preceding two filters. See Details for recommended settings.
+#' @param anchor_gap Integer. Search radius: how far apart (bp) can a peak and loop anchor be for the peak to be considered "near" the anchor? \code{-1L} (default): strict physical overlap required (GenomicRanges default -- peak and anchor must share at least 1 bp). \code{0L}: adjacent intervals (peak end == anchor start) also count. \code{>0}: explicit gap tolerance (e.g. \code{200} for cross-experiment integration). When \code{>= 0}, the result includes both physically overlapping pairs AND proximity-only pairs (within gap but no actual overlap). Use \code{anchor_min_overlap > 1} to require actual physical overlap among these candidates.
+#' @param anchor_min_overlap Integer. After candidate pairs are found (via \code{anchor_gap}), how many base pairs of actual physical overlap are required? Default \code{1L}: any touch counts (including proximity-only hits when \code{anchor_gap >= 0}). Increase to \code{10-100} to filter out spurious boundary overlaps. Setting this \code{> 1} with \code{anchor_gap >= 0} ensures that even with gap tolerance, only pairs with genuine physical overlap are retained.
+#' @param anchor_min_frac Numeric (0-1). After the first two filters, what fraction of the \emph{peak} width must physically overlap the anchor? Default \code{0}: any fraction accepted. Set to \code{0.1-0.5} when peaks are broad (e.g. H3K27ac domains, 2-5 kb) so a 1 bp overlap does not link the entire broad peak. Ignored for point features (SNPs, eQTLs). Applied last, only to pairs that passed \code{anchor_gap} and \code{anchor_min_overlap}.
 #' @param hub_percentile Numeric (0-1). Loop-count quantile for hub detection. Default: \code{0.95}. Genes or distal elements with connectivity at or above this quantile are flagged as hubs. A minimum floor of 3 (promoter-centric) or 2 (distal) is applied to avoid false hubs in small datasets.
 #' @param write_output Logical. If \code{TRUE} (default), write the Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.
 #' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
@@ -499,6 +523,7 @@
 #'     )
 #'     head(res$loop_annotation, 1)
 #' }
+
 annotate_peaks_and_loops <- function(
   bedpe_file,
   target_bed = NULL,
@@ -516,7 +541,8 @@ annotate_peaks_and_loops <- function(
   hub_percentile = 0.95,
   min_expr = 0,
   conflict_strategy = c("biotype_first", "expression_first"),
-  anchor_gap = 0L,
+  co_dominance_ratio = 0.1,
+  anchor_gap = -1L,
   anchor_min_overlap = 1L,
   anchor_min_frac = 0,
   write_output = TRUE,
@@ -525,6 +551,8 @@ annotate_peaks_and_loops <- function(
     species <- match.arg(species, c("hg38", "hg19", "mm10", "mm9"))
     stopifnot(length(tss_region) == 2L)
     conflict_strategy <- match.arg(conflict_strategy)
+    .validate_annotation_params(anchor_gap, anchor_min_overlap, anchor_min_frac,
+                                hub_percentile, neighbor_hop, karyo_bin_size)
     log_message <- function(...) {
         if (!quiet) message(...)
     }
@@ -576,7 +604,8 @@ annotate_peaks_and_loops <- function(
         min_expr = min_expr,
         conflict_strategy = conflict_strategy,
         neighbor_hop = neighbor_hop,
-        log_message = log_message
+        log_message = log_message,
+        co_dominance_ratio = co_dominance_ratio
     )
 
     # --- Step 4: Build annotation tables & stats ---
@@ -619,7 +648,8 @@ annotate_peaks_and_loops <- function(
             log_message = log_message,
             anchor_gap = anchor_gap,
             anchor_min_overlap = anchor_min_overlap,
-            anchor_min_frac = anchor_min_frac
+            anchor_min_frac = anchor_min_frac,
+            co_dominance_ratio = co_dominance_ratio
         )
         bed_info <- target_res$bed_info
         target_connected_loops <- target_res$target_connected_loops
@@ -628,33 +658,11 @@ annotate_peaks_and_loops <- function(
 
     # --- Step 6: Visualization ---
     log_message("Step 6: Generating Visualizations (Returning plot objects)...")
-    plot_df <- loop_annotation_final
-    plot_df$loop_genes <- plot_df$All_Anchor_Genes
-    plot_list <- if (quiet) {
-        .with_messages_silenced(
-            .with_known_upstream_noise_suppressed(
-                build_annotation_plots(
-                    plot_df = plot_df, bed_info = bed_info,
-                    cluster_info = cluster_info,
-                    target_connected_loops = target_connected_loops,
-                    txdb_obj = txdb_obj, org_db_pkg = org_db_pkg,
-                    species = species, project_name = project_name,
-                    color_palette = color_palette, karyo_bin_size = karyo_bin_size
-                )
-            )
-        )
-    } else {
-        .with_known_upstream_noise_suppressed(
-            build_annotation_plots(
-                plot_df = plot_df, bed_info = bed_info,
-                cluster_info = cluster_info,
-                target_connected_loops = target_connected_loops,
-                txdb_obj = txdb_obj, org_db_pkg = org_db_pkg,
-                species = species, project_name = project_name,
-                color_palette = color_palette, karyo_bin_size = karyo_bin_size
-            )
-        )
-    }
+    plot_list <- .generate_annotation_plots(
+        loop_annotation_final, bed_info, cluster_info, target_connected_loops,
+        txdb_obj, org_db_pkg, species, project_name, color_palette,
+        karyo_bin_size, quiet
+    )
 
     # --- Step 7: Export ---
     loop_annotation_clean <- loop_annotation_final %>%
@@ -694,16 +702,79 @@ annotate_peaks_and_loops <- function(
                 hub_percentile = hub_percentile,
                 min_expr = min_expr,
                 conflict_strategy = conflict_strategy,
+                co_dominance_ratio = co_dominance_ratio,
                 has_target_bed = !is.null(target_bed),
                 has_expression = !is.null(expr_matrix_file)
             ),
             genome_build = species,
-            score_semantics = "loop type classification; higher n_members = more evidence"
+            score_semantics = "loop type classification; higher n_members = more evidence",
+            database_versions = .record_database_versions(species)
         )
     ))
 }
 
 # --- Internal helpers extracted from annotate_peaks_and_loops ---
+
+#' Internal: Validate annotation parameters
+#' @keywords internal
+#' @noRd
+.validate_annotation_params <- function(anchor_gap, anchor_min_overlap,
+                                         anchor_min_frac, hub_percentile,
+                                         neighbor_hop, karyo_bin_size) {
+    if (!is.numeric(anchor_gap) || length(anchor_gap) != 1L ||
+        is.na(anchor_gap) || anchor_gap < -1L)
+        stop("anchor_gap must be >= -1 (-1 = strict overlap, 0 = adjacent, >0 = proximity)", call. = FALSE)
+    if (!is.numeric(anchor_min_overlap) || length(anchor_min_overlap) != 1L ||
+        is.na(anchor_min_overlap) || anchor_min_overlap < 1L)
+        stop("anchor_min_overlap must be a positive integer (>= 1)", call. = FALSE)
+    if (!is.numeric(anchor_min_frac) || length(anchor_min_frac) != 1L ||
+        is.na(anchor_min_frac) || anchor_min_frac < 0 || anchor_min_frac > 1)
+        stop("anchor_min_frac must be in [0, 1]", call. = FALSE)
+    if (!is.numeric(hub_percentile) || length(hub_percentile) != 1L ||
+        is.na(hub_percentile) || hub_percentile <= 0 || hub_percentile > 1)
+        stop("hub_percentile must be in (0, 1]", call. = FALSE)
+    if (!is.numeric(neighbor_hop) || length(neighbor_hop) != 1L ||
+        is.na(neighbor_hop) || neighbor_hop < 0 || neighbor_hop != floor(neighbor_hop))
+        stop("neighbor_hop must be a non-negative integer", call. = FALSE)
+    if (!is.numeric(karyo_bin_size) || length(karyo_bin_size) != 1L ||
+        is.na(karyo_bin_size) || karyo_bin_size < 1)
+        stop("karyo_bin_size must be a positive number", call. = FALSE)
+}
+
+#' Internal: Generate annotation plots with optional message silencing
+#' @keywords internal
+#' @noRd
+.generate_annotation_plots <- function(loop_annotation_final, bed_info,
+    cluster_info, target_connected_loops, txdb_obj, org_db_pkg, species,
+    project_name, color_palette, karyo_bin_size, quiet) {
+    plot_df <- loop_annotation_final
+    plot_df$loop_genes <- plot_df$All_Anchor_Genes
+    if (quiet) {
+        .with_messages_silenced(
+            .with_known_upstream_noise_suppressed(
+                build_annotation_plots(
+                    plot_df = plot_df, bed_info = bed_info,
+                    cluster_info = cluster_info,
+                    target_connected_loops = target_connected_loops,
+                    txdb_obj = txdb_obj, org_db_pkg = org_db_pkg,
+                    species = species, project_name = project_name,
+                    color_palette = color_palette, karyo_bin_size = karyo_bin_size
+                )
+            )
+        )
+    } else {
+        .with_known_upstream_noise_suppressed(
+            build_annotation_plots(
+                plot_df = plot_df, bed_info = bed_info,
+                cluster_info = cluster_info,
+                target_connected_loops = target_connected_loops,
+                txdb_obj = txdb_obj, org_db_pkg = org_db_pkg,
+                species = species, project_name = project_name,
+                color_palette = color_palette, karyo_bin_size = karyo_bin_size
+            )
+        )
+    }
+}
 
 #' Internal: Read BEDPE and cluster anchors
 #' @return A list with \code{loops}, \code{anchors}, \code{gr_anchors},
@@ -724,11 +795,11 @@ annotate_peaks_and_loops <- function(
         )
     }
     loops <- .validate_bedpe_df(loops, quiet = quiet)
-    anchors <- dplyr::bind_rows(
+    anchors <- data.table::rbindlist(list(
         loops %>% dplyr::select(chr = chr1, start = start1, end = end1),
         loops %>% dplyr::select(chr = chr2, start = start2, end = end2)
-    ) %>%
-        dplyr::distinct() %>%
+    )) %>%
+        unique() %>%
         dplyr::mutate(anchor_id = paste0("A", seq_len(dplyr::n())))
     loops <- loops %>%
         dplyr::left_join(
@@ -787,7 +858,8 @@ annotate_peaks_and_loops <- function(
 #' @noRd
 .classify_anchors_and_topology <- function(
     gr_anchors, loops, g, txdb_obj, org_db_pkg, tss_region,
-    gene_expr_map, min_expr, conflict_strategy, neighbor_hop, log_message
+    gene_expr_map, min_expr, conflict_strategy, neighbor_hop, log_message,
+    co_dominance_ratio = 0.1
 ) {
     log_message("Step 3: Biological Classification & Topology...")
     anchor_anno <- .with_known_upstream_noise_suppressed(
@@ -800,7 +872,8 @@ annotate_peaks_and_loops <- function(
     anchor_anno_df <- resolve_gene_conflicts(
         anchor_anno_df, txdb_obj, org_db_pkg, tss_region,
         gene_expr_map, min_expr = min_expr,
-        conflict_strategy = conflict_strategy
+        conflict_strategy = conflict_strategy,
+        co_dominance_ratio = co_dominance_ratio
     )
     anchor_anno_df$type_code <- vapply(
         anchor_anno_df$annotation, .annotation_feature_class,
@@ -983,7 +1056,7 @@ annotate_peaks_and_loops <- function(
         dplyr::summarise(
             Total_Loops = dplyr::n(),
             n_Linked_Promoters = sum(Neighbor_Type == "P", na.rm = TRUE),
-            n_Linked_Distal = sum(Neighbor_Type %in% c("E", "G"), na.rm = TRUE),
+            n_Linked_Distal = sum(Neighbor_Type %in% c("E", "eP", "eG", "G"), na.rm = TRUE),
             Dominant_Interaction = names(which.max(table(Loop_Type))),
             .groups = "drop"
         )
@@ -1018,66 +1091,9 @@ annotate_peaks_and_loops <- function(
 
     # --- Distal element stats ---
     log_message("    Generating Distal Element Stats...")
-    distal_raw_df <- dplyr::bind_rows(
-        loop_annotation_final %>%
-            dplyr::filter(anchor1_type %in% c("E", "G")) %>%
-            dplyr::select(
-                Distal_Anchor_ID = a1_id, Distal_Type = anchor1_type,
-                Neighbor_Gene = anchor2_gene, Neighbor_Type = anchor2_type,
-                Loop_Type = loop_type
-            ),
-        loop_annotation_final %>%
-            dplyr::filter(anchor2_type %in% c("E", "G")) %>%
-            dplyr::select(
-                Distal_Anchor_ID = a2_id, Distal_Type = anchor2_type,
-                Neighbor_Gene = anchor1_gene, Neighbor_Type = anchor1_type,
-                Loop_Type = loop_type
-            )
-    ) %>%
-        dplyr::group_by(Distal_Anchor_ID) %>%
-        dplyr::summarise(
-            Total_Loops = dplyr::n(),
-            n_Linked_Promoters = sum(Neighbor_Type == "P", na.rm = TRUE),
-            n_Linked_Distal = sum(Neighbor_Type %in% c("E", "G"), na.rm = TRUE),
-            Dominant_Interaction = names(which.max(table(Loop_Type))),
-            Target_Genes = extract_genes(Neighbor_Gene[Neighbor_Type == "P"]),
-            .groups = "drop"
-        )
-
-    anchor_coords_map <- anchors %>%
-        dplyr::select(anchor_id, chr, start, end, cluster_id) %>%
-        dplyr::distinct()
-
-    if (nrow(distal_raw_df) > 0) {
-        final_cutoff_dist <- max(
-            quantile(distal_raw_df$Total_Loops, hub_percentile, na.rm = TRUE), 3
-        )
-        distal_element_df <- distal_raw_df %>%
-            dplyr::left_join(
-                anchor_coords_map, by = c("Distal_Anchor_ID" = "anchor_id")
-            ) %>%
-            dplyr::mutate(
-                Is_High_Connectivity_Distal_Element = dplyr::if_else(
-                    Total_Loops >= final_cutoff_dist, "Yes", "No"
-                )
-            ) %>%
-            dplyr::select(
-                chr, start, end, cluster_id, Total_Loops,
-                n_Linked_Promoters, n_Linked_Distal, Dominant_Interaction,
-                Is_High_Connectivity_Distal_Element, Target_Genes
-            ) %>%
-            dplyr::arrange(dplyr::desc(Total_Loops))
-    } else {
-        distal_element_df <- data.frame(
-            chr = character(), start = integer(), end = integer(),
-            cluster_id = character(), Total_Loops = integer(),
-            n_Linked_Promoters = integer(), n_Linked_Distal = integer(),
-            Dominant_Interaction = character(),
-            Is_High_Connectivity_Distal_Element = character(),
-            Target_Genes = character(),
-            stringsAsFactors = FALSE
-        )
-    }
+    distal_element_df <- .build_distal_element_stats(
+        loop_annotation_final, anchors, hub_percentile
+    )
 
     list(
         loop_annotation_final = loop_annotation_final,
@@ -1123,6 +1139,58 @@ annotate_peaks_and_loops <- function(
             warning("Failed to save Excel workbook: ", conditionMessage(e),
                     call. = FALSE)
     )
+}
+
+#' Internal: Build distal element connectivity data frame
+#' @keywords internal
+#' @noRd
+.build_distal_element_stats <- function(loop_annotation_final, anchors,
+                                          hub_percentile) {
+    distal_raw_df <- dplyr::bind_rows(
+        loop_annotation_final %>%
+            dplyr::filter(anchor1_type %in% c("E", "G")) %>%
+            dplyr::select(Distal_Anchor_ID = a1_id, Distal_Type = anchor1_type,
+                Neighbor_Gene = anchor2_gene, Neighbor_Type = anchor2_type,
+                Loop_Type = loop_type),
+        loop_annotation_final %>%
+            dplyr::filter(anchor2_type %in% c("E", "G")) %>%
+            dplyr::select(Distal_Anchor_ID = a2_id, Distal_Type = anchor2_type,
+                Neighbor_Gene = anchor1_gene, Neighbor_Type = anchor1_type,
+                Loop_Type = loop_type)
+    ) %>%
+        dplyr::group_by(Distal_Anchor_ID) %>%
+        dplyr::summarise(
+            Total_Loops = dplyr::n(),
+            n_Linked_Promoters = sum(Neighbor_Type == "P", na.rm = TRUE),
+            n_Linked_Distal = sum(Neighbor_Type %in% c("E", "eP", "eG", "G"), na.rm = TRUE),
+            Dominant_Interaction = names(which.max(table(Loop_Type))),
+            Target_Genes = extract_genes(Neighbor_Gene[Neighbor_Type == "P"]),
+            .groups = "drop"
+        )
+    anchor_coords_map <- anchors %>%
+        dplyr::select(anchor_id, chr, start, end, cluster_id) %>%
+        dplyr::distinct()
+    if (nrow(distal_raw_df) == 0) {
+        return(data.frame(
+            chr = character(), start = integer(), end = integer(),
+            cluster_id = character(), Total_Loops = integer(),
+            n_Linked_Promoters = integer(), n_Linked_Distal = integer(),
+            Dominant_Interaction = character(),
+            Is_High_Connectivity_Distal_Element = character(),
+            Target_Genes = character(), stringsAsFactors = FALSE
+        ))
+    }
+    final_cutoff <- max(quantile(distal_raw_df$Total_Loops, hub_percentile,
+        na.rm = TRUE), 3)
+    distal_raw_df %>%
+        dplyr::left_join(anchor_coords_map,
+            by = c("Distal_Anchor_ID" = "anchor_id")) %>%
+        dplyr::mutate(Is_High_Connectivity_Distal_Element =
+            dplyr::if_else(Total_Loops >= final_cutoff, "Yes", "No")) %>%
+        dplyr::select(chr, start, end, cluster_id, Total_Loops,
+            n_Linked_Promoters, n_Linked_Distal, Dominant_Interaction,
+            Is_High_Connectivity_Distal_Element, Target_Genes) %>%
+        dplyr::arrange(dplyr::desc(Total_Loops))
 }
 
 .empty_target_gene_links <- function() {
@@ -2222,7 +2290,9 @@ build_annotation_plots <- function(
 #' Export refined results to Excel workbook.
 #' @keywords internal
 #' @noRd
-.refine_export_workbook <- function(loop_df, clust_info, promoter_centric_df, distal_element_df, bed_info, target_gene_links, out_dir, project_name) {
+.refine_export_workbook <- function(loop_df, clust_info, promoter_centric_df,
+    distal_element_df, bed_info, target_gene_links, out_dir, project_name,
+    chromatin_validation = NULL) {
     wb <- openxlsx::createWorkbook()
     loop_export <- loop_df %>%
         dplyr::select(-any_of(c("a1_id", "a2_id", "loop_genes", "single_loop_genes", "proximate_loop_gene")))
@@ -2254,6 +2324,10 @@ build_annotation_plots <- function(
         openxlsx::addWorksheet(wb, "Filtered Target Gene Links")
         openxlsx::writeData(wb, "Filtered Target Gene Links", target_gene_links)
     }
+    if (!is.null(chromatin_validation) && nrow(chromatin_validation) > 0) {
+        openxlsx::addWorksheet(wb, "Chromatin Validation")
+        openxlsx::writeData(wb, "Chromatin Validation", chromatin_validation)
+    }
 
     tryCatch(
         openxlsx::saveWorkbook(wb, file.path(out_dir, paste0(project_name, "_Refined_Results.xlsx")), overwrite = TRUE),
@@ -2274,7 +2348,7 @@ build_annotation_plots <- function(
 #' \strong{Algorithmic Framework:}
 #' \itemize{
 #'   \item \strong{Target Filtration:} Parses merged gene assignments (e.g., \code{"GeneA;GeneB"}), evaluates individual genes against a defined expression threshold, and retains only transcriptionally active targets.
-#'   \item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as enhancer-like regulatory elements (\code{eP}, \code{eG}). This adjusts the regulatory syntax to reflect functional states (e.g., reannotating a silent \code{P-P} loop to an \code{eP-P} interaction).
+#'   \item \strong{Biological Reclassification:} Reclassifies physically annotated promoters (\code{P}) and gene bodies (\code{G}) lacking active transcription as \emph{expression-filtered silent} regulatory elements (\code{eP}, \code{eG}). \strong{Important:} \code{eP}/\code{eG} labels indicate transcriptional silence at the reference gene -- they do \strong{not} constitute evidence of enhancer activity. Orthogonal chromatin data (ATAC-seq, H3K27ac, H3K4me1) are required for functional enhancer interpretation. The labels are retained for backward compatibility; interpret them as "inactive-P" / "inactive-G" rather than "enhancer-P" / "enhancer-G".
 #'   \item \strong{Expression-Aware Connectivity Statistics:} Recomputes promoter-centric and distal-element connectivity after expression-aware anchor refinement, while preserving all structural loops in the refined loop annotation. This separates the complete physical contact map from the high-confidence active subset.
 #'   \item \strong{External Target Refinement:} Filters auxiliary target mapping columns (e.g., \code{Assigned_Target_Genes_Filled}) based on expression criteria, ensuring that mapped 1D genomic features are exclusively linked to active genes.
 #'   \item \strong{Target Provenance Preservation:} Recomputes \code{*_Filled}
@@ -2296,27 +2370,32 @@ build_annotation_plots <- function(
 #' Excel sheet.
 #'
 #' \strong{Interpretation of eP/eG labels:}
-#' The \code{eP} and \code{eG} labels capture expression-aware enhancer-like
-#' regulatory states, enabling \code{looplook} to distinguish transcriptionally
-#' silent reference promoters or gene bodies from putative regulatory anchors in
-#' 3D chromatin space. Orthogonal chromatin evidence, including ATAC-seq
-#' accessibility, H3K27ac enrichment, or H3K27me3 depletion, can further
-#' strengthen biological interpretation when available. Users holding matched
-#' ATAC-seq or ChIP-seq data may overlay eP/eG loci with these tracks to
-#' confirm residual regulatory activity at transcriptionally silent promoters.
+#' \code{eP} and \code{eG} are \strong{expression-filtered silent states}, not
+#' functional enhancer classifications. Bulk RNA-seq silence can arise from
+#' cell-type proportions, time-point effects, sequencing depth, or promoter
+#' pausing -- none of which imply the locus has gained enhancer activity.
+#' These labels should be read as "transcriptionally inactive P/G" and
+#' treated as hypotheses requiring orthogonal validation (ATAC-seq, H3K27ac,
+#' H3K4me1, or H3K27me3 depletion). Users with matched chromatin data should
+#' overlay eP/eG loci against these tracks before interpreting them as
+#' putative regulatory elements.
 #'
 #' @param annotation_res List. The raw foundational output object returned by \code{\link{annotate_peaks_and_loops}}.
 #' @param expr_matrix_file Path to a normalised expression matrix (TPM/FPKM, genes x samples). Required for refinement. Default: \code{NULL}.
 #' @param sample_columns Character vector or integer indices. Columns in \code{expr_matrix_file} to average. Default: \code{NULL}.
 #' @param threshold Numeric. Minimum expression (e.g. TPM >= 1) for a gene to be considered active. Default: \code{1}.
 #' @param unit_type Character. Expression unit for plot labels (e.g., \code{"TPM"}). Default: \code{"TPM"}.
-#' @param species Character. Genome assembly. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.
+#' @param species Character. Genome assembly. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}. Extensible to other species via \code{species_txdb_pkg()} and related helpers.
 #' @param out_dir Character. Output directory for the Excel results file. Default: \code{"./results/filtered"}.
 #' @param project_name Character. Prefix for output files (automatically appends \code{"_Filtered"}). Default: \code{"HiChIP"}.
 #' @param color_palette Character. RColorBrewer palette name for loop-type colour assignments. Default: \code{"Paired"}.
 #' @param karyo_bin_size Integer. Bin width in bp for karyotype heatmaps. Default: \code{1e5}.
 #' @param reclassify_by_expression Logical. If \code{TRUE} (default), silent promoters (P) and gene bodies (G) are reclassified as eP/eG.
 #' @param hub_percentile Numeric (0-1). Node-degree quantile for hub detection. Default: \code{0.95}.
+#' @param chromatin_beds Named list of BED file paths for orthogonal chromatin
+#'   mark validation of eP/eG anchors. When non-empty, a \emph{Chromatin
+#'   Validation} sheet is added to the Excel workbook (see
+#'   \code{\link{validate_epeG_by_chromatin}}). Default: \code{list()} (skip).
 #' @param write_output Logical. If \code{TRUE} (default), write the refined Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.
 #' @param quiet Logical. If \code{TRUE}, suppress progress messages while preserving warnings. Default: \code{FALSE}.
 #'
@@ -2384,12 +2463,18 @@ build_annotation_plots <- function(
 #'       \item (Refine only) \code{Passes_Expression_Filter}: Logical. \code{TRUE} if
 #'         \code{Mean_Expression >= threshold}.
 #'     }
+#'   \item \code{chromatin_validation} -- Data frame from
+#'     \code{\link{validate_epeG_by_chromatin}} with confidence levels and
+#'     evidence strings for each eP/eG anchor. \code{NULL} when
+#'     \code{chromatin_beds} is empty.
 #'   \item \code{plots} -- Named list of ggplot objects (dumbbell, rose, karyotype).
 #'   \item \code{plot_list} -- Backward-compatible alias of \code{plots}.
+#'   \item \code{metadata} -- Internal metadata list (parameters, versions, database versions). Not intended for direct use.
 #' }
 #' If \code{write_output = TRUE}, also writes \code{_Refined_Results.xlsx} to \code{out_dir}.
-#' The workbook contains a \emph{Functional Loop Annotation} sheet with only
-#' loops where \code{Retained_In_Functional_Network == TRUE}.
+#' The workbook contains a \emph{Chromatin Validation} sheet (when
+#' \code{chromatin_beds} is provided) and a \emph{Functional Loop Annotation}
+#' sheet with only loops where \code{Retained_In_Functional_Network == TRUE}.
 #'
 #' @importFrom dplyr %>% filter group_by summarise ungroup mutate select rename left_join full_join arrange desc case_when rowwise coalesce any_of distinct pull
 #' @importFrom ggplot2 ggplot aes geom_bar geom_segment geom_point geom_text scale_color_manual scale_fill_manual theme_minimal theme_void labs coord_polar xlim
@@ -2439,6 +2524,7 @@ refine_loop_anchors_by_expression <- function(
   karyo_bin_size = 1e5,
   reclassify_by_expression = TRUE,
   hub_percentile = 0.95,
+  chromatin_beds = list(),
   write_output = TRUE,
   quiet = FALSE
 ) {
@@ -2451,6 +2537,11 @@ refine_loop_anchors_by_expression <- function(
     if (!grepl("_Filtered$", project_name)) project_name <- paste0(project_name, "_Filtered")
     if (write_output && !dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
     log_message(">>> [Refinement] Project Name: ", project_name)
+    if (isTRUE(reclassify_by_expression)) {
+        log_message(">>> NOTE: eP/eG labels indicate expression-filtered silent P/G anchors.")
+        log_message(">>> These are NOT functional enhancer calls. Validate with ATAC-seq,")
+        log_message(">>> H3K27ac, or other chromatin data before biological interpretation.")
+    }
 
     # --- 1. Load & Validate ---
     refine_data <- .refine_load_validate_data(
@@ -2544,12 +2635,27 @@ refine_loop_anchors_by_expression <- function(
         )
     }
 
+    # --- 5.5 Orthogonal chromatin validation (optional) ---
+    chromatin_validation <- NULL
+    if (length(chromatin_beds) > 0) {
+        log_message(">>> [Step 5.5] Orthogonal Chromatin Validation...")
+        chromatin_validation <- validate_epeG_by_chromatin(
+            annotation_res = list(loop_annotation = loop_df),
+            chromatin_beds = chromatin_beds,
+            anchor_gap = 200,
+            anchor_min_overlap = 100,
+            species = species,
+            quiet = quiet
+        )
+    }
+
     # --- 6. Export ---
     if (write_output) {
         log_message(">>> [Step 6] Exporting Refined Results...")
         .refine_export_workbook(
             loop_df, clust_info, promoter_centric_df, distal_element_df,
-            bed_info, target_gene_links, out_dir, project_name
+            bed_info, target_gene_links, out_dir, project_name,
+            chromatin_validation = chromatin_validation
         )
         log_message("    Excel saved.")
     }
@@ -2563,6 +2669,7 @@ refine_loop_anchors_by_expression <- function(
         distal_element_stats = distal_element_df,
         target_annotation = bed_info,
         target_gene_links = target_gene_links,
+        chromatin_validation = chromatin_validation,
         plots = plot_list,
         plot_list = plot_list,
         metadata = .build_looplook_metadata(
@@ -2575,7 +2682,8 @@ refine_loop_anchors_by_expression <- function(
                 species = species
             ),
             genome_build = species,
-            score_semantics = "expression-refined; eP/eG = enhancer-like silent regulatory elements"
+            score_semantics = "expression-refined; eP/eG = expression-filtered silent P/G (NOT functional enhancers; validate with ATAC/H3K27ac)",
+            database_versions = .record_database_versions(species)
         )
     ))
 }
@@ -3129,4 +3237,341 @@ format_annotation_columns <- function(df) {
             dplyr::relocate(annotation, .before = detail_anno)
     }
     return(df)
+}
+
+#' @title Orthogonal validation of eP/eG reclassification by chromatin marks
+#'
+#' @description
+#' Validates the expression-aware eP/eG reclassification produced by
+#' \code{\link{refine_loop_anchors_by_expression}} using orthogonal chromatin
+#' data (ATAC-seq, ChIP-seq). Each eP/eG anchor is tested for overlap with
+#' user-supplied mark BED files and assigned a confidence level based on the
+#' ENCODE active-enhancer signature.
+#'
+#' @details
+#' \strong{Confidence levels (ENCODE active-enhancer criteria):}
+#' \itemize{
+#'   \item \code{"gold_standard"}: All five marks align with the canonical
+#'     active-enhancer signature: H3K4me1(+), H3K27ac(+), ATAC(+),
+#'     H3K4me3(-), H3K27me3(-). Requires all five marks to be provided.
+#'   \item \code{"high_confidence"}: H3K4me1(+) and H3K27ac(+), or
+#'     H3K4me1(+) and ATAC(+). At least two supporting marks present.
+#'   \item \code{"supported"}: At least one enhancer-associated mark
+#'     (H3K4me1, H3K27ac, or ATAC) is present.
+#'   \item \code{"weak"}: Only exclusion marks are informative
+#'     (H3K27me3(-) or H3K4me3(-)) without positive enhancer evidence.
+#'   \item \code{"uncertain"}: No chromatin data provided or no overlaps
+#'     detected.
+#' }
+#'
+#' \strong{Mark semantics:}
+#' \itemize{
+#'   \item \emph{Positive marks} (presence = supporting evidence):
+#'     \code{H3K4me1}, \code{H3K27ac}, \code{ATAC}.
+#'   \item \emph{Negative marks} (absence = supporting evidence):
+#'     \code{H3K27me3}, \code{H3K4me3}.
+#' }
+#'
+#' @param annotation_res List. Output from
+#'   \code{\link{annotate_peaks_and_loops}} or
+#'   \code{\link{refine_loop_anchors_by_expression}}.
+#'   When the refined output is provided, all anchors classified as
+#'   \code{eP} or \code{eG} are validated (regardless of
+#'   \code{Retained_In_Functional_Network} status). When the raw annotation
+#'   is provided, all anchors
+#'   annotated as P or G are tested.
+#' @param chromatin_beds Named list of BED file paths. Names must be
+#'   mark identifiers: any of \code{"H3K4me1"}, \code{"H3K27ac"},
+#'   \code{"ATAC"}, \code{"H3K27me3"}, \code{"H3K4me3"}.
+#'   Additional names are ignored with a warning.
+#' @param anchor_gap Integer. Maximum gap (bp) between an anchor and a
+#'   chromatin peak for them to be considered overlapping. Default: \code{200}.
+#' @param anchor_min_overlap Integer. Minimum overlap (bp) required.
+#'   Default: \code{100}.
+#' @param species Character. Genome assembly for seqlevel harmonization.
+#'   Default: \code{"hg38"}.
+#' @param quiet Logical. Suppress progress messages. Default: \code{FALSE}.
+#'
+#' @return A data frame with one row per candidate anchor (eP/eG when the input
+#'   is refined, P/G when the input is raw from \code{annotate_peaks_and_loops}):
+#' \describe{
+#'   \item{\code{anchor_id}}{Anchor identifier.}
+#'   \item{\code{chr}, \code{start}, \code{end}}{Anchor coordinates.}
+#'   \item{\code{anchor_type}}{Original type (P or G) before reclassification.}
+#'   \item{\code{anchor_gene}}{Gene symbol(s) at this anchor.}
+#'   \item{\code{cluster_id}}{Loop cluster identifier.}
+#'   \item{\code{H3K4me1}, \code{H3K27ac}, \code{ATAC}}{Logical. TRUE if
+#'     the anchor overlaps the corresponding positive mark.}
+#'   \item{\code{H3K27me3}, \code{H3K4me3}}{Logical. TRUE if the anchor
+#'     overlaps the corresponding negative mark.}
+#'   \item{\code{confidence}}{Factor with levels:
+#'     \code{"gold_standard"}, \code{"high_confidence"}, \code{"supported"},
+#'     \code{"weak"}, \code{"uncertain"}.}
+#'   \item{\code{evidence}}{Human-readable summary of which marks supported
+#'     the classification.}
+#' }
+#'
+#' @importFrom GenomicRanges GRanges findOverlaps makeGRangesFromDataFrame
+#' @importFrom S4Vectors queryHits
+#' @export
+#'
+#' @examples
+#' # Load pre-computed annotation result
+#' rdata_path <- system.file("extdata", "analysis_results.RData",
+#'                           package = "looplook")
+#' temp_env <- new.env()
+#' load(rdata_path, envir = temp_env)
+#' raw_annotation <- temp_env[[ls(temp_env)[1]]]
+#'
+#' # Create dummy chromatin BED files for demonstration
+#' bed_dir <- tempdir()
+#' writeLines("chr6\t10410000\t10413000", file.path(bed_dir, "H3K4me1.bed"))
+#' writeLines("chr6\t10411000\t10414000", file.path(bed_dir, "H3K27ac.bed"))
+#'
+#' # Run validation (using raw annotation; pass refined for eP/eG only)
+#' result <- validate_epeG_by_chromatin(
+#'     annotation_res = raw_annotation,
+#'     chromatin_beds = list(
+#'         H3K4me1 = file.path(bed_dir, "H3K4me1.bed"),
+#'         H3K27ac = file.path(bed_dir, "H3K27ac.bed")
+#'     ),
+#'     quiet = TRUE
+#' )
+#' table(result$confidence)
+#'
+validate_epeG_by_chromatin <- function(
+    annotation_res,
+    chromatin_beds = list(),
+    anchor_gap = 200,
+    anchor_min_overlap = 100,
+    species = "hg38",
+    quiet = FALSE
+) {
+    log_message <- function(...) {
+        if (!quiet) message(...)
+    }
+
+    # ---- 1. Identify candidate anchors ----
+    epeG_anchors <- .extract_epeG_anchors(annotation_res, log_message)
+
+    # ---- 2. Validate chromatin_beds input ----
+    known_marks <- c("H3K4me1", "H3K27ac", "ATAC", "H3K27me3", "H3K4me3")
+    if (length(chromatin_beds) == 0) {
+        warning("No chromatin_beds provided; all anchors classified as 'uncertain'.",
+                call. = FALSE)
+    }
+    unknown <- setdiff(names(chromatin_beds), known_marks)
+    if (length(unknown) > 0) {
+        warning("Unknown mark names ignored: ",
+                paste(unknown, collapse = ", "),
+                ". Expected: ", paste(known_marks, collapse = ", "),
+                call. = FALSE)
+    }
+    provided_marks <- intersect(names(chromatin_beds), known_marks)
+
+    # ---- 3+4. Overlap marks with anchors ----
+    mark_matrix <- .overlap_chromatin_marks(
+        epeG_anchors, chromatin_beds, provided_marks, known_marks,
+        anchor_gap, anchor_min_overlap, log_message
+    )
+
+    # ---- 5. Assign confidence levels and evidence ----
+    result <- .assign_chromatin_confidence(
+        epeG_anchors, mark_matrix, provided_marks, known_marks
+    )
+
+    # ---- 6. Summary ----
+    log_message("--- Validation Summary ---")
+    tab <- table(result$confidence, useNA = "ifany")
+    for (lvl in names(tab)) {
+        log_message(sprintf("  %-16s: %d anchors", lvl, tab[lvl]))
+    }
+    log_message("--- End Validation ---")
+
+    out <- result %>%
+        dplyr::arrange(confidence, anchor_id) %>%
+        dplyr::select(
+            anchor_id, chr, start, end,
+            anchor_type, anchor_gene, cluster_id,
+            H3K4me1, H3K27ac, ATAC, H3K27me3, H3K4me3,
+            confidence, evidence
+        )
+    attr(out, "looplook_metadata") <- list(
+        package = "looplook",
+        version = as.character(utils::packageVersion("looplook")),
+        function_name = "validate_epeG_by_chromatin",
+        call_time = Sys.time(),
+        parameters = list(
+            anchor_gap = anchor_gap,
+            anchor_min_overlap = anchor_min_overlap,
+            species = species,
+            marks_provided = names(chromatin_beds),
+            mark_files = lapply(chromatin_beds, basename)
+        ),
+        r_version = R.version.string,
+        platform = R.version$platform
+    )
+    out
+}
+
+#' Internal: Empty validation result data frame
+#' @keywords internal
+#' @noRd
+.empty_validation_result <- function() {
+    data.frame(
+        anchor_id = character(), chr = character(),
+        start = integer(), end = integer(),
+        anchor_type = character(), anchor_gene = character(),
+        cluster_id = character(),
+        H3K4me1 = logical(), H3K27ac = logical(), ATAC = logical(),
+        H3K27me3 = logical(), H3K4me3 = logical(),
+        confidence = factor(levels = c("gold_standard", "high_confidence",
+                                       "supported", "weak", "uncertain")),
+        evidence = character(),
+        stringsAsFactors = FALSE
+    )
+}
+
+#' Internal: Extract eP/eG (or P/G) anchors from annotation results
+#' @keywords internal
+#' @noRd
+.extract_epeG_anchors <- function(annotation_res, log_message) {
+    loop_df <- annotation_res$loop_annotation
+    if (is.null(loop_df)) stop("'annotation_res$loop_annotation' is missing.")
+    has_refined <- "Retained_In_Functional_Network" %in% colnames(loop_df)
+    has_anchor_ids <- all(c("a1_id", "a2_id") %in% colnames(loop_df))
+
+    if (has_anchor_ids) {
+        anchor_map <- dplyr::bind_rows(
+            loop_df %>% dplyr::select(anchor_id = a1_id, chr = chr1,
+                start = start1, end = end1, anchor_type = anchor1_type,
+                anchor_gene = anchor1_gene, cluster_id),
+            loop_df %>% dplyr::select(anchor_id = a2_id, chr = chr2,
+                start = start2, end = end2, anchor_type = anchor2_type,
+                anchor_gene = anchor2_gene, cluster_id)
+        ) %>% dplyr::distinct()
+    } else {
+        anchor_map <- dplyr::bind_rows(
+            loop_df %>% dplyr::mutate(anchor_id = paste(chr1, start1, end1,
+                sep = "_")) %>% dplyr::select(anchor_id, chr = chr1,
+                start = start1, end = end1, anchor_type = anchor1_type,
+                anchor_gene = anchor1_gene, cluster_id),
+            loop_df %>% dplyr::mutate(anchor_id = paste(chr2, start2, end2,
+                sep = "_")) %>% dplyr::select(anchor_id, chr = chr2,
+                start = start2, end = end2, anchor_type = anchor2_type,
+                anchor_gene = anchor2_gene, cluster_id)
+        ) %>% dplyr::distinct()
+    }
+
+    type_label <- if (has_refined) "eP/eG" else "P/G"
+    type_filter <- if (has_refined) c("eP", "eG") else c("P", "G")
+    epeG_anchors <- anchor_map %>% dplyr::filter(anchor_type %in% type_filter)
+    if (nrow(epeG_anchors) == 0) {
+        message("No ", type_label, " anchors found. Returning empty result.")
+        return(.empty_validation_result())
+    }
+    log_message(sprintf("Validating %d %s anchors...", nrow(epeG_anchors), type_label))
+    epeG_anchors
+}
+
+#' Internal: Overlap chromatin mark BEDs with anchor GRanges
+#' @keywords internal
+#' @noRd
+.overlap_chromatin_marks <- function(epeG_anchors, chromatin_beds, provided_marks,
+                                      known_marks, anchor_gap, anchor_min_overlap,
+                                      log_message) {
+    if (inherits(epeG_anchors, "data.frame") && nrow(epeG_anchors) == 0)
+        return(data.frame())
+    gr_anchors <- .with_known_upstream_noise_suppressed(
+        GenomicRanges::makeGRangesFromDataFrame(epeG_anchors, keep.extra.columns = TRUE)
+    )
+    mark_matrix <- as.data.frame(
+        matrix(NA, nrow = nrow(epeG_anchors), ncol = length(known_marks),
+               dimnames = list(NULL, known_marks))
+    )
+    for (mark in provided_marks) {
+        bed_path <- chromatin_beds[[mark]]
+        if (is.null(bed_path) || !file.exists(bed_path)) {
+            warning("BED file not found for ", mark, ": ", bed_path, call. = FALSE)
+            next
+        }
+        log_message(sprintf("  Overlapping with %s ...", mark))
+        mark_gr <- read_simple_bed(bed_path, quiet = TRUE)
+        mark_gr <- .harmonize_seqlevels(mark_gr, gr_anchors, mark)
+        hits <- GenomicRanges::findOverlaps(gr_anchors, mark_gr, maxgap = anchor_gap)
+        if (anchor_min_overlap > 1L && length(hits) > 0) {
+            q_gr <- gr_anchors[S4Vectors::queryHits(hits)]
+            s_gr <- mark_gr[S4Vectors::subjectHits(hits)]
+            overlap_w <- GenomicRanges::width(GenomicRanges::pintersect(q_gr, s_gr))
+            hits <- hits[overlap_w >= anchor_min_overlap]
+        }
+        hit_anchors <- unique(S4Vectors::queryHits(hits))
+        mark_matrix[[mark]][hit_anchors] <- TRUE
+        log_message(sprintf("    %d / %d anchors overlap %s peaks",
+            length(hit_anchors), nrow(epeG_anchors), mark))
+    }
+    mark_matrix
+}
+
+#' Internal: Assign chromatin confidence levels and evidence strings
+#' @keywords internal
+#' @noRd
+.assign_chromatin_confidence <- function(epeG_anchors, mark_matrix,
+                                          provided_marks, known_marks) {
+    if (nrow(mark_matrix) == 0) return(.empty_validation_result())
+    result <- epeG_anchors
+    result$H3K4me1  <- mark_matrix$H3K4me1
+    result$H3K27ac  <- mark_matrix$H3K27ac
+    result$ATAC     <- mark_matrix$ATAC
+    result$H3K27me3 <- mark_matrix$H3K27me3
+    result$H3K4me3  <- mark_matrix$H3K4me3
+
+    has_positive <- vapply(seq_len(nrow(result)), function(i) {
+        isTRUE(result$H3K4me1[i]) || isTRUE(result$H3K27ac[i]) || isTRUE(result$ATAC[i])
+    }, logical(1))
+    has_negative_excl <- vapply(seq_len(nrow(result)), function(i) {
+        .is_absent <- function(x) !is.na(x) && !x
+        .is_absent(result$H3K27me3[i]) && .is_absent(result$H3K4me3[i])
+    }, logical(1))
+    all_five <- length(provided_marks) == 5
+    .is_absent <- function(x) !is.na(x) && !x
+
+    result$confidence <- vapply(seq_len(nrow(result)), function(i) {
+        h3k4me1_t <- !is.na(result$H3K4me1[i]); h3k27ac_t <- !is.na(result$H3K27ac[i])
+        atac_t    <- !is.na(result$ATAC[i])
+        h3k27me3_t <- !is.na(result$H3K27me3[i]); h3k4me3_t <- !is.na(result$H3K4me3[i])
+        neg <- c(
+            if (.is_absent(result$H3K27me3[i])) "H3K27me3-",
+            if (.is_absent(result$H3K4me3[i])) "H3K4me3-"
+        )
+        if (all_five && h3k4me1_t && h3k27ac_t && atac_t && h3k27me3_t && h3k4me3_t &&
+            result$H3K4me1[i] && result$H3K27ac[i] && result$ATAC[i] &&
+            .is_absent(result$H3K27me3[i]) && .is_absent(result$H3K4me3[i]))
+            return("gold_standard")
+        if (h3k4me1_t && result$H3K4me1[i] &&
+            ((h3k27ac_t && result$H3K27ac[i]) || (atac_t && result$ATAC[i])))
+            return("high_confidence")
+        if (has_positive[i]) return("supported")
+        if (length(neg) > 0) return("weak")
+        return("uncertain")
+    }, character(1))
+
+    result$confidence <- factor(result$confidence,
+        levels = c("gold_standard", "high_confidence", "supported", "weak", "uncertain"))
+
+    result$evidence <- vapply(seq_len(nrow(result)), function(i) {
+        parts <- c()
+        if (isTRUE(result$H3K4me1[i]))  parts <- c(parts, "H3K4me1+")
+        if (isTRUE(result$H3K27ac[i]))  parts <- c(parts, "H3K27ac+")
+        if (isTRUE(result$ATAC[i]))     parts <- c(parts, "ATAC+")
+        if (isTRUE(result$H3K27me3[i])) parts <- c(parts, "H3K27me3+")
+        if (isTRUE(result$H3K4me3[i]))  parts <- c(parts, "H3K4me3+")
+        if (isTRUE(!is.na(result$H3K27me3[i]) && !result$H3K27me3[i]))
+            parts <- c(parts, "H3K27me3-")
+        if (isTRUE(!is.na(result$H3K4me3[i]) && !result$H3K4me3[i]))
+            parts <- c(parts, "H3K4me3-")
+        if (length(parts) == 0) return("no_data")
+        paste(parts, collapse = "; ")
+    }, character(1))
+    result
 }

@@ -55,20 +55,24 @@ if (getRversion() >= "2.15.1") {
         "in_regulated_promoter", "in_assigned_target", "in_all_loop_connected",
         "in_regulated_promoter_filled", "in_assigned_target_filled",
         "opposite_anchor_id", "local_anchor_id", "Mean_Expression",
-        "Passes_Expression_Filter", "retained_after_refinement"
+        "Passes_Expression_Filter", "retained_after_refinement",
+        "H3K4me1", "H3K27ac", "ATAC", "H3K27me3", "H3K4me3",
+        "anchor_type", "anchor_gene", "confidence", "evidence"
     ))
 }
 
 # Only suppress specific non-actionable upstream noise from third-party packages.
-# User/data validation warnings must remain visible to avoid masking real issues.
+# Only suppress truly non-actionable third-party noise (deprecation warnings
+# from upstream packages). Warnings about data integrity -- including
+# out-of-bound ranges, which often indicate genome-build mismatches or
+# coordinate errors -- must remain visible.
 .with_known_upstream_noise_suppressed <- function(expr) {
     withCallingHandlers(
         expr,
         warning = function(w) {
             msg <- conditionMessage(w)
             if (
-                grepl("out-of-bound ranges", msg, fixed = TRUE) ||
-                    grepl("S4Vectors:::anyMissing\\(\\).*deprecated", msg) ||
+                grepl("S4Vectors:::anyMissing\\(\\).*deprecated", msg) ||
                     grepl("`aes_()` was deprecated in ggplot2 3.0.0.", msg, fixed = TRUE) ||
                     grepl("`aes_string()` was deprecated in ggplot2 3.0.0.", msg, fixed = TRUE) ||
                     grepl("Using `size` aesthetic for lines was deprecated", msg, fixed = TRUE) ||
@@ -498,7 +502,7 @@ species_bsgenome_pkg <- function(species) {
 #' @param conflict_strategy Character. Conflict resolution order.
 #'   \code{"biotype_first"} (default): select the best biotype tier first,
 #'   then apply expression filtering within that tier. This is the more
-#'   conservative default — a silent protein-coding gene is preferred over
+#'   conservative default -- a silent protein-coding gene is preferred over
 #'   a highly expressed lncRNA at the same locus.
 #'   \code{"expression_first"}: apply expression filtering across all
 #'   biotypes first, then pick the best biotype among expressed candidates.
@@ -511,7 +515,8 @@ species_bsgenome_pkg <- function(species) {
 resolve_gene_conflicts <- function(
   current_anno_df, txdb_obj, org_db_pkg,
   tss_region, gene_expr_map, min_expr = 0,
-  conflict_strategy = c("biotype_first", "expression_first")
+  conflict_strategy = c("biotype_first", "expression_first"),
+  co_dominance_ratio = 0.1
 ) {
     if (nrow(current_anno_df) == 0) {
         return(current_anno_df)
@@ -563,7 +568,7 @@ resolve_gene_conflicts <- function(
                         if (max_tpm <= 0) {
                             paste(sort(unique(genes)), collapse = ";")
                         } else {
-                            active_genes <- genes[tpms >= max_tpm * 0.1]
+                            active_genes <- genes[tpms >= max(max_tpm * co_dominance_ratio, 1e-6)]
                             paste(sort(unique(active_genes)), collapse = ";")
                         }
                     }
@@ -692,7 +697,7 @@ resolve_gene_conflicts <- function(
 #' @param g Character. Semicolon-delimited gene string.
 #' @param t Character. Anchor type code (P, E, G, eP, eG).
 #' @param allow Character vector. Whitelist of active gene symbols.
-#' @param down Logical. If \code{TRUE}, reclassify silent P→eP and G→eG.
+#' @param down Logical. If \code{TRUE}, reclassify silent P->eP and G->eG.
 #' @return A list with \code{type} and \code{gene}.
 #' @keywords internal
 #' @noRd
@@ -1132,6 +1137,10 @@ load_expression_matrix <- function(expr_matrix_file, sample_columns = NULL) {
     }
     sub_mat_num <- as.data.frame(sub_mat_num, check.names = FALSE)
 
+    if (is.null(sample_columns)) {
+        message("sample_columns not specified; averaging all ", ncol(sub_mat_num),
+                " sample columns for baseline expression")
+    }
     vals <- if (ncol(sub_mat_num) > 1) {
         rowMeans(sub_mat_num, na.rm = TRUE)
     } else {
@@ -1184,13 +1193,16 @@ get_colors <- function(n, palette_input) {
 
 #' Internal: Draw Karyotype Heatmap
 #'
-#' Creates a genome-wide heatmap of genomic feature density (e.g., loops) across chromosomes,
-#' binned by a fixed window size, and rendered as a karyotype plot.
+#' Creates a genome-wide heatmap of genomic feature density (e.g., loops) across
+#' standard chromosomes, binned by a fixed window size, and rendered as a
+#' karyotype plot. Only canonical chromosomes (chr1-22,X,Y for human;
+#' chr1-19,X,Y for mouse) are displayed; chrM and alternate contigs are
+#' silently excluded.
 #'
 #' @param gr_data (GRanges) Genomic ranges to visualize (e.g., loop anchors).
 #' @param title_prefix (character) Subtitle descriptor (e.g., sample name).
 #' @param bin_size (integer) Bin width in base pairs (e.g., 1e6 for 1 Mb).
-#' @param sat_level (numeric) Quantile (0–1) for color saturation (e.g., 0.95).
+#' @param sat_level (numeric) Quantile (0-1) for color saturation (e.g., 0.95).
 #' @param ref_txdb (TxDb or similar) Reference genome annotation for chromosome lengths.
 #' @param plot_species (character) Genome build/species code (e.g., "hg38", "mm10").
 #' @param unit_label (character) Unit for load annotation (e.g., "loops").
@@ -1489,6 +1501,39 @@ draw_pie_with_outside_labels <- function(data_df, group_col, title, palette) {
         )
 }
 
+#' Internal: Record Versions of Key External Databases
+#'
+#' Attempts to look up the installed versions of annotation packages
+#' commonly used by looplook. Missing packages are recorded as \code{NA}.
+#' @param species Character. Genome assembly (e.g. \code{"hg38"}).
+#' @return A named list of version strings.
+#' @keywords internal
+#' @noRd
+.record_database_versions <- function(species = NULL) {
+    get_pkg_version <- function(pkg) {
+        if (!is.null(pkg) && requireNamespace(pkg, quietly = TRUE))
+            as.character(utils::packageVersion(pkg))
+        else
+            NA_character_
+    }
+    txdb_pkg <- if (!is.null(species)) tryCatch(species_txdb_pkg(species), error = function(e) NULL) else NULL
+    orgdb_pkg <- if (!is.null(species)) tryCatch(species_orgdb_pkg(species), error = function(e) NULL) else NULL
+    bsgenome_pkg <- if (!is.null(species)) tryCatch(species_bsgenome_pkg(species), error = function(e) NULL) else NULL
+
+    list(
+        TxDb       = get_pkg_version(txdb_pkg),
+        OrgDb      = get_pkg_version(orgdb_pkg),
+        BSgenome   = get_pkg_version(bsgenome_pkg),
+        JASPAR     = get_pkg_version("JASPAR2020"),
+        clusterProfiler = get_pkg_version("clusterProfiler"),
+        STRINGdb   = get_pkg_version("STRINGdb"),
+        motifmatchr = get_pkg_version("motifmatchr"),
+        txdb_pkg   = txdb_pkg,
+        orgdb_pkg  = orgdb_pkg,
+        bsgenome_pkg = bsgenome_pkg
+    )
+}
+
 #' Internal: Build Run Metadata
 #'
 #' Creates a standardised metadata list recording package version,
@@ -1504,7 +1549,8 @@ draw_pie_with_outside_labels <- function(data_df, group_col, title, palette) {
 .build_looplook_metadata <- function(fun, params = list(),
                                       genome_build = NULL,
                                       score_semantics = NULL,
-                                      diagnostics = NULL) {
+                                      diagnostics = NULL,
+                                      database_versions = NULL) {
     m <- list(
         package = "looplook",
         version = as.character(utils::packageVersion("looplook")),
@@ -1517,5 +1563,6 @@ draw_pie_with_outside_labels <- function(data_df, group_col, title, palette) {
         platform = R.version$platform
     )
     if (!is.null(diagnostics)) m$diagnostics <- diagnostics
+    if (!is.null(database_versions)) m$database_versions <- database_versions
     m
 }

@@ -47,7 +47,7 @@ profile_target_genes(
 
 \item{target_source}{Character vector. Source of target genes to analyze.}
 
-\item{target_mapping_mode}{Character. Specifies the mapping strategy for target genes.}
+\item{target_mapping_mode}{Character. Mapping strategy: \code{"all"} (any anchor-gene connection) or \code{"promoter"} (require direct promoter contact).}
 
 \item{loop_types}{Character vector. The specific loop types to analyze.}
 
@@ -100,6 +100,7 @@ Each element contains:
 \item{\code{go_results}}{Named list of data frames (one per gene set) containing GO enrichment results (if \code{run_go = TRUE}).}
 \item{\code{target_gene_sets}}{Named list of character vectors containing target gene symbols.}
 \item{\code{plots}}{Named list of ggplot objects (LFC_Violin, GSEA, Heatmap, Scatter, GO_Network, PPI_Network, etc.).}
+\item{\code{warnings}}{Character vector of module-level warnings (e.g., "\link[AnnotationDbi:colsAndKeytypes]{AnnotationDbi::GO} failed: ..."). Empty if all modules succeeded.}
 }
 }
 \description{

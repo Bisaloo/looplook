@@ -369,8 +369,8 @@ read_simple_bed <- function(bed_file, quiet = FALSE) {
 #'   If \code{NULL} (default), the threshold is automatically calculated:
 #'   \itemize{
 #'     \item For 2-3 replicates: Requires all (100\%).
-#'     \item For \eqn{N \ge 4}: Requires \eqn{\lfloor 0.75N \rfloor + 1}
-#'       (e.g., 3 for N=4, 4 for N=5, 7 for N=8).
+#'     \item For \eqn{N \ge 4}: Requires \eqn{\ge 75\%} of replicates
+#'       (\code{ceiling(0.75 * n_reps)}; e.g., 3 for N=4, 4 for N=5, 6 for N=8).
 #'   }
 #' @param min_raw_score Numeric. \strong{Pre-filtering threshold}. Loops with a raw score (e.g., read count) below this value in individual files will be discarded \strong{before} any merging or intersection.
 #'   \itemize{
@@ -393,8 +393,10 @@ read_simple_bed <- function(bed_file, quiet = FALSE) {
 #'   \code{"none"}: silently accept all clusters.
 #'   \code{"drop"}: remove clusters exceeding the threshold.
 #'   \code{"error"}: stop with an error.
-#' @param blacklist_species Character. Species/build for built-in blacklist
-#'   (e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.
+#' @param blacklist_species Character. Species/build for built-in ENCODE
+#'   blacklist (\code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}),
+#'   or a path to a custom BED file. When a species name is recognised, the
+#'   bundled blacklist is used; otherwise the value is treated as a file path.
 #' @param region_of_interest Character. Path to BED file defining regions of interest (ROI). Only loops overlapping these regions will be kept.
 #' @param roi_mode Character. How loops must overlap \code{region_of_interest}.
 #'   \code{"any"} (default): keep loops where \emph{either} anchor overlaps the ROI
@@ -412,6 +414,9 @@ read_simple_bed <- function(bed_file, quiet = FALSE) {
 #'     \item{\code{n_reps}}{Number of input files that support this entry.}
 #'     \item{\code{cluster_id}}{Connected-component cluster identifier.}
 #'   }
+#'   The returned object carries a \code{looplook_metadata} attribute (access via
+#'   \code{attr(x, "looplook_metadata")}) with package version, call parameters,
+#'   diagnostics, and database versions.
 #'   When \code{write_output = TRUE} and \code{out_file} is provided, an extended
 #'   BEDPE file is written with the additional columns \code{n_members} and
 #'   \code{n_reps} appended after the standard BEDPE fields.
@@ -500,6 +505,35 @@ consolidate_chromatin_loops <- function(
     mode <- match.arg(mode)
     roi_mode <- match.arg(roi_mode)
     chaining_policy <- match.arg(chaining_policy)
+
+    # Parameter validation
+    if (!is.numeric(gap) || length(gap) != 1L || is.na(gap) || gap < 0)
+        stop("`gap` must be a non-negative number", call. = FALSE)
+    if (!is.null(min_consensus) &&
+        (!is.numeric(min_consensus) || length(min_consensus) != 1L ||
+         is.na(min_consensus) || min_consensus < 1))
+        stop("`min_consensus` must be a positive integer or NULL", call. = FALSE)
+    if (!is.null(min_raw_score) &&
+        (!is.numeric(min_raw_score) || length(min_raw_score) != 1L ||
+         is.na(min_raw_score)))
+        stop("`min_raw_score` must be a single number or NULL", call. = FALSE)
+    if (!is.null(min_score) &&
+        (!is.numeric(min_score) || length(min_score) != 1L ||
+         is.na(min_score)))
+        stop("`min_score` must be a single number or NULL", call. = FALSE)
+    if (!is.null(blacklist_species)) {
+        if (!is.character(blacklist_species) || length(blacklist_species) != 1L ||
+            is.na(blacklist_species) || !nzchar(blacklist_species))
+            stop("`blacklist_species` must be a non-empty string or NULL", call. = FALSE)
+    }
+    if (!is.null(region_of_interest)) {
+        if (!is.character(region_of_interest) || length(region_of_interest) != 1L ||
+            is.na(region_of_interest) || !nzchar(region_of_interest))
+            stop("`region_of_interest` must be a non-empty file path or NULL", call. = FALSE)
+        if (!file.exists(region_of_interest))
+            stop("`region_of_interest` file not found: ", region_of_interest, call. = FALSE)
+    }
+
     n_reps <- length(files)
 
     # --- Read & pre-filter files ---
@@ -630,6 +664,24 @@ consolidate_chromatin_loops <- function(
     chaining_policy, log_message
 ) {
     log_message(">>> Clustering mode (Union/Consensus): Merging coordinates via Graph")
+
+    # Seqlevels consistency check across input files.
+    # chr1 vs 1, or mixed UCSC/Ensembl styles, cause silent false negatives
+    # in the string-based chr matching inside cluster_loops_dt().
+    sl_styles <- unique(vapply(gi_list, function(gi) {
+        tryCatch(GenomeInfoDb::seqlevelsStyle(InteractionSet::anchors(gi, "first"))[1],
+                 error = function(e) NA_character_)
+    }, character(1)))
+    sl_styles <- sl_styles[!is.na(sl_styles)]
+    if (length(sl_styles) > 1L) {
+        warning("Input BEDPE files have mixed seqlevel styles: ",
+                paste(sl_styles, collapse = ", "), ". ",
+                "Loop clustering uses string-based chromosome matching. ",
+                "Mismatched styles (e.g. 'chr1' vs '1') will produce ",
+                "false negatives. Harmonise your input files first.",
+                call. = FALSE)
+    }
+
     combined_dt <- data.table::rbindlist(lapply(gi_list, gi_to_dt))
 
     # Pre-clustering gap diagnosis; capture anchor width for post-clustering use
@@ -642,14 +694,10 @@ consolidate_chromatin_loops <- function(
 
     if (mode == "consensus") {
         if (is.null(min_consensus)) {
-            if (n_reps == 2) {
-                min_consensus <- 2
-            } else if (n_reps == 3) {
-                min_consensus <- 3
-            } else if (n_reps == 4) {
-                min_consensus <- 3
+            if (n_reps <= 3) {
+                min_consensus <- n_reps  # 100% for 2-3 replicates
             } else {
-                min_consensus <- floor(0.75 * n_reps) + 1
+                min_consensus <- ceiling(0.75 * n_reps)  # >=75% for N >= 4
             }
         }
         log_message(">>> Consensus mode: Keeping clusters in >= ", min_consensus, " replicates")
@@ -754,7 +802,7 @@ consolidate_chromatin_loops <- function(
             bad <- unique(c(S4Vectors::queryHits(h1), S4Vectors::queryHits(h2)))
             if (length(bad)) result_gi <- result_gi[-bad]
         } else {
-            warning("Blacklist file not found: ", blacklist_species)
+            stop("Blacklist file not found: ", blacklist_species, call. = FALSE)
         }
     }
 
@@ -824,11 +872,16 @@ consolidate_chromatin_loops <- function(
         },
         stringsAsFactors = FALSE
     )
-    dir.create(dirname(out_file), showWarnings = FALSE, recursive = TRUE)
-    utils::write.table(out_df, out_file,
-        sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE
+    tryCatch({
+        dir.create(dirname(out_file), showWarnings = FALSE, recursive = TRUE)
+        utils::write.table(out_df, out_file,
+            sep = "\t", row.names = FALSE, col.names = FALSE, quote = FALSE
+        )
+        log_message("Finished! Saved to ", out_file)
+    }, error = function(e)
+        warning("Failed to save consolidated BEDPE: ", conditionMessage(e),
+                call. = FALSE)
     )
-    log_message("Finished! Saved to ", out_file)
 }
 
 
@@ -949,7 +1002,11 @@ dt_to_gi <- function(dt) {
     q25_w <- stats::quantile(all_widths, 0.25, na.rm = TRUE, names = FALSE)
     q75_w <- stats::quantile(all_widths, 0.75, na.rm = TRUE, names = FALSE)
 
-    # Nearest same-side anchor distance (minimum inter-loop anchor spacing)
+    # Consecutive anchor spacing (distance to previous anchor after sorting).
+    # This is NOT a true nearest-neighbour distance — it only measures gaps
+    # between consecutive anchors on the same chromosome.  Adequate for
+    # diagnostic purposes (estimating typical anchor spacing) but should not
+    # be interpreted as a rigorous spatial statistic.
     .nearest_dist <- function(chr_vec, start_vec, end_vec) {
         ord <- order(chr_vec, start_vec)
         s_chr <- chr_vec[ord]
@@ -1203,12 +1260,45 @@ dt_to_gi <- function(dt) {
     ))
 }
 
+#' Internal: Core clustering for one chromosome-pair subset
+#' @keywords internal
+#' @noRd
+.cluster_loops_inner <- function(dt, gap) {
+    n_loops <- nrow(dt)
+    if (n_loops == 0) return(dt)
+
+    hits <- dt[dt, on = .(
+        chr1 = chr1,
+        a1_l <= end1,
+        a1_r >= start1,
+        chr2 = chr2,
+        a2_l <= end2,
+        a2_r >= start2
+    ), nomatch = NULL, allow.cartesian = TRUE]
+
+    edges <- hits[idx < i.idx, .(from = idx, to = i.idx)]
+
+    g <- igraph::make_empty_graph(n = n_loops, directed = FALSE)
+    if (nrow(edges) > 0) {
+        edge_vec <- as.vector(t(as.matrix(edges)))
+        g <- igraph::add_edges(g, edge_vec)
+    }
+
+    comp <- igraph::components(g)
+    dt[, cluster := comp$membership]
+    dt
+}
+
 cluster_loops_dt <- function(dt, gap) {
     # All coordinates are 1-based closed (from gi_to_dt).
     # gap=0: only overlapping anchors merge (end1 >= start2 and end2 >= start1).
     #   Touching boundaries (end1 == start2) DO merge -- consistent with
     #   Bioconductor"s findOverlaps(maxgap=0) semantics.
     # gap=N: anchors within N bp merge (end1 + N >= start2).
+    #
+    # Clustering is batched by chromosome pair (chr1, chr2) to avoid O(N^2)
+    # self-join on large datasets.  The join condition requires chr1 == chr1
+    # and chr2 == chr2, so splitting is lossless.
     dt[, idx := .I]
     dt[, `:=`(
         a1_l = start1 - gap,
@@ -1227,25 +1317,22 @@ cluster_loops_dt <- function(dt, gap) {
         )
     }
 
-    hits <- dt[dt, on = .(
-        chr1 = chr1,
-        a1_l <= end1,
-        a1_r >= start1,
-        chr2 = chr2,
-        a2_l <= end2,
-        a2_r >= start2
-    ), nomatch = NULL, allow.cartesian = TRUE]
-
-    edges <- hits[idx < i.idx, .(from = idx, to = i.idx)]
-
-    g <- igraph::make_empty_graph(n = nrow(dt), directed = FALSE)
-    if (nrow(edges) > 0) {
-        edge_vec <- as.vector(t(as.matrix(edges)))
-        g <- igraph::add_edges(g, edge_vec)
+    # Split by chromosome pair and cluster independently
+    dt_list <- split(dt, by = c("chr1", "chr2"), drop = TRUE)
+    n_chunks <- length(dt_list)
+    if (n_chunks > 10) message("Clustering loops across ", n_chunks, " chromosome pairs...")
+    clust_offset <- 0L
+    result_list <- vector("list", length(dt_list))
+    for (i in seq_along(dt_list)) {
+        chunk <- .cluster_loops_inner(dt_list[[i]], gap)
+        if (clust_offset > 0L) {
+            chunk[, cluster := cluster + clust_offset]
+        }
+        clust_offset <- max(chunk$cluster)
+        result_list[[i]] <- chunk
     }
+    dt <- data.table::rbindlist(result_list)
 
-    comp <- igraph::components(g)
-    dt[, cluster := comp$membership]
     dt[, `:=`(idx = NULL, a1_l = NULL, a1_r = NULL, a2_l = NULL, a2_r = NULL)]
     dt
 }

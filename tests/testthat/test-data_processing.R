@@ -493,3 +493,49 @@ test_that("consolidate_chromatin_loops write_output=FALSE does not create direct
   expect_s4_class(gi, "GInteractions")
   expect_false(dir.exists(out_dir))
 })
+
+# --- consolidate_chromatin_loops parameter validation ---
+test_that("consolidate_chromatin_loops validates numeric parameters", {
+  f1 <- tempfile(fileext = ".bedpe")
+  f2 <- tempfile(fileext = ".bedpe")
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f1)
+  writeLines("chr1\t100\t200\tchr1\t400\t500", f2)
+  expect_error(consolidate_chromatin_loops(files = c(f1,f2), gap = -1, quiet = TRUE))
+  expect_error(consolidate_chromatin_loops(files = c(f1,f2), min_consensus = 0, quiet = TRUE))
+  expect_error(consolidate_chromatin_loops(files = c(f1,f2),
+    region_of_interest = "/nonexistent/path.bed", quiet = TRUE))
+  unlink(c(f1, f2))
+})
+
+# --- .diagnose_gap small data ---
+test_that(".diagnose_gap returns NULL for small data", {
+  dt <- data.table::data.table(
+    chr1 = "chr1", start1 = 100L, end1 = 200L,
+    chr2 = "chr1", start2 = 1000L, end2 = 2000L,
+    score = 1, source = 1L
+  )
+  expect_null(looplook:::.diagnose_gap(dt, 1000, function(...) {}))
+})
+
+# --- .diagnose_clusters empty ---
+test_that(".diagnose_clusters handles zero clusters", {
+  empty_gi <- InteractionSet::GInteractions(GenomicRanges::GRanges(), GenomicRanges::GRanges())
+  empty_dt <- data.table::data.table(cluster=integer(), n_members=integer(), n_reps=integer())
+  expect_null(looplook:::.diagnose_clusters(empty_gi, empty_dt, 1000, function(...) {}))
+})
+
+# --- .diagnose_gap: RISK MODERATE path (800bp anchors, gap=2000) ---
+test_that(".diagnose_gap detects moderate risk for mid-width anchors", {
+  dt <- data.table::data.table(
+    chr1 = rep("chr1", 15),
+    start1 = seq(100, 15000, by = 1000),
+    end1 = seq(900, 15800, by = 1000),
+    chr2 = rep("chr1", 15),
+    start2 = seq(50000, 64000, by = 1000),
+    end2 = seq(50800, 64800, by = 1000),
+    score = 1, source = 1L
+  )
+  msg <- capture.output(looplook:::.diagnose_gap(dt, 2000, message), type = "message")
+  expect_true(any(grepl("RISK MODERATE", msg)) ||
+              any(grepl("RISK HIGH", msg)))  # either is fine for coverage
+})

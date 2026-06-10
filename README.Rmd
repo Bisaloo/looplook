@@ -91,7 +91,7 @@ The module systematically exports a multi-layered tabular catalog (e.g., `*_Basi
 
 * **3D Network Architecture (`loop_annotation`)** Resolves the biological syntax of the structural interactome. It classifies topological interactions (loop_type, e.g., E-P, P-P) and distinguishes biologically relevant `Putative_Target_Genes` from the broader, raw physical interaction footprints (`All_Anchor_Genes`).
 
-* **Topological Hub Detection** Quantifies structural node degrees (e.g., `n_Linked_Promoters`, `n_Linked_Distal`) to rigorously deconstruct the 3D interactome from two complementary perspectives: **`promoter_centric_stats`**: Identifies core target genes regulated by **complex regulatory architectures** (e.g., enhancer arrays or transcription factories)，while **`distal_element_stats`** highlights high-connectivity non-coding regions to facilitate the discovery of putative enhancer cliques.
+* **Topological Hub Detection** Quantifies structural node degrees (e.g., `n_Linked_Promoters`, `n_Linked_Distal`) to rigorously deconstruct the 3D interactome from two complementary perspectives: **`promoter_centric_stats`**: Identifies core target genes regulated by **complex regulatory architectures** (e.g., enhancer arrays or transcription factories), while **`distal_element_stats`** highlights high-connectivity non-coding regions to facilitate the discovery of putative enhancer cliques.
 
 <div align="center">
   <img src="man/figures/g1_anno.jpg" width="800" style="border: 1px solid #ddd; border-radius: 4px; padding: 5px;" alt="Annotation Results" />
@@ -99,7 +99,7 @@ The module systematically exports a multi-layered tabular catalog (e.g., `*_Basi
 </div>
 
 ### Module 3: Expression-Aware Refinement
-Physical proximity is a structural prerequisite, but not a direct proxy for active **transcriptional regulation**. This module integrates quantitative transcriptome data to annotate each loop with expression-aware functional status. All structural loops are preserved; the pipeline reclassifies silent anchors (P → eP, G → eG), flags which loops belong to the high-confidence functional subset (`Retained_In_Functional_Network`), and exposes `Refinement_Action` for transparent interpretation.
+Physical proximity is a structural prerequisite, but not a direct proxy for active **transcriptional regulation**. This module integrates quantitative transcriptome data to annotate each loop with expression-aware functional status. All structural loops are preserved; the pipeline reclassifies silent anchors (P to eP, G to eG), flags which loops belong to the high-confidence functional subset (`Retained_In_Functional_Network`), and exposes `Refinement_Action` for transparent interpretation.
 
 **Key Parameters:**
 
@@ -129,6 +129,8 @@ Following transcriptome integration, the refined tabular outputs represent a hig
 * **Filtered Target Gene Links**: The refined provenance sheet retains only peak-gene links still used by the refined target columns and appends `Mean_Expression` plus `Passes_Expression_Filter`, so inactive Basic-stage links are not carried forward as active refined evidence.
 
 The `eP` and `eG` labels denote expression-inactive promoter- or gene-body-associated anchors treated as distal-like regulatory anchors for network syntax. These should not be interpreted as experimentally validated enhancers without additional epigenomic evidence (e.g., ATAC-seq accessibility, H3K27ac enrichment).
+
+**Orthogonal Chromatin Validation.** `looplook` provides `validate_epeG_by_chromatin()` for testing eP/eG anchors against user-supplied chromatin mark BED files (ATAC-seq, H3K27ac, H3K4me1, H3K27me3, H3K4me3). Anchors are scored against ENCODE active-enhancer criteria (gold_standard / high_confidence / supported / weak / uncertain). The function can be called standalone, embedded in `refine_loop_anchors_by_expression()` via the `chromatin_beds` parameter (adds a *Chromatin Validation* sheet to the Excel workbook), or rendered in `looplook_report()` HTML output.
 
 <div align="center">
   <img src="man/figures/g2_refine.jpg" width="800" style="border: 1px solid #ddd; border-radius: 4px; padding: 5px;" alt="Refinement Results" />

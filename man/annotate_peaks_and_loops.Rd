@@ -21,7 +21,8 @@ annotate_peaks_and_loops(
   hub_percentile = 0.95,
   min_expr = 0,
   conflict_strategy = c("biotype_first", "expression_first"),
-  anchor_gap = 0L,
+  co_dominance_ratio = 0.1,
+  anchor_gap = -1L,
   anchor_min_overlap = 1L,
   anchor_min_frac = 0,
   write_output = TRUE,
@@ -38,9 +39,9 @@ Additional columns beyond 6 are retained in the output; anchor swapping only aff
 
 \item{org_db}{An \code{OrgDb} object, a package name string, or \code{NULL} to auto-resolve from \code{species}. Default: \code{NULL}.}
 
-\item{species}{Character. Genome assembly used when \code{txdb} and \code{org_db} are \code{NULL}. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}.}
+\item{species}{Character. Genome assembly used when \code{txdb} and \code{org_db} are \code{NULL}. One of \code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}. Default: \code{"hg38"}. The package is currently tested on human and mouse; the architecture supports extension to other species by adding entries to \code{species_txdb_pkg()}, \code{species_orgdb_pkg()}, and \code{species_bsgenome_pkg()}.}
 
-\item{tss_region}{Numeric vector of length 2. Promoter window around the TSS in bp. Default: \code{c(-2000, 2000)}.}
+\item{tss_region}{Numeric vector of length 2. Promoter window around the TSS in bp. Default: \code{c(-2000, 2000)} (typical for mammalian protein-coding genes; may need widening for broad domains like HOX clusters, or narrowing for compact genomes).}
 
 \item{out_dir}{Character. Output directory for the Excel results file. Default: \code{"./results"}.}
 
@@ -74,11 +75,17 @@ the best biotype tier first, then apply expression filtering within that
 tier. \code{"expression_first"}: apply expression filtering across all
 biotypes first, then pick the best biotype among expressed candidates.}
 
-\item{anchor_gap}{Integer. Maximum gap (bp) allowed between a target peak and a loop anchor for them to be considered overlapping. \code{0} (default) requires physical contact -- appropriate when peaks and loops are called from the same experiment (e.g. HiChIP). Increase to 100-500 for cross-experiment integration (e.g. ATAC-seq peaks with HiChIP loops) where boundaries may differ slightly. See Details for a table of recommended settings.}
+\item{co_dominance_ratio}{Numeric (0-1). In the expression tiebreaker step,
+genes with expression >= \code{co_dominance_ratio x max(expression)} in the
+group are retained together. Default: \code{0.1} (i.e. within one order of
+magnitude). Lower values (e.g. \code{0.01}) retain more co-dominant
+candidates; higher values (e.g. \code{0.5}) are more stringent.}
 
-\item{anchor_min_overlap}{Integer. Minimum overlap in base pairs required between a peak and an anchor. Default: \code{1L} (any 1 bp touch is sufficient). Increase to filter out spurious boundary-level overlaps (e.g. 10-100 bp for noisy data). Applied after \code{anchor_gap} as a post-filter on actual physical overlap. See Details for recommended settings.}
+\item{anchor_gap}{Integer. Search radius: how far apart (bp) can a peak and loop anchor be for the peak to be considered "near" the anchor? \code{-1L} (default): strict physical overlap required (GenomicRanges default -- peak and anchor must share at least 1 bp). \code{0L}: adjacent intervals (peak end == anchor start) also count. \code{>0}: explicit gap tolerance (e.g. \code{200} for cross-experiment integration). When \code{>= 0}, the result includes both physically overlapping pairs AND proximity-only pairs (within gap but no actual overlap). Use \code{anchor_min_overlap > 1} to require actual physical overlap among these candidates.}
 
-\item{anchor_min_frac}{Numeric (0-1). Minimum overlap as a fraction of the \emph{peak} width. Default: \code{0} (any fractional overlap accepted). Set to \code{0.1-0.5} to require that a meaningful portion of the peak overlaps the anchor. Useful when peaks are broad (e.g. H3K27ac domains, 2-5 kb) and a 1 bp overlap would be artefactual. Not recommended for point features (SNPs, eQTLs). Applied after the preceding two filters. See Details for recommended settings.}
+\item{anchor_min_overlap}{Integer. After candidate pairs are found (via \code{anchor_gap}), how many base pairs of actual physical overlap are required? Default \code{1L}: any touch counts (including proximity-only hits when \code{anchor_gap >= 0}). Increase to \code{10-100} to filter out spurious boundary overlaps. Setting this \code{> 1} with \code{anchor_gap >= 0} ensures that even with gap tolerance, only pairs with genuine physical overlap are retained.}
+
+\item{anchor_min_frac}{Numeric (0-1). After the first two filters, what fraction of the \emph{peak} width must physically overlap the anchor? Default \code{0}: any fraction accepted. Set to \code{0.1-0.5} when peaks are broad (e.g. H3K27ac domains, 2-5 kb) so a 1 bp overlap does not link the entire broad peak. Ignored for point features (SNPs, eQTLs). Applied last, only to pairs that passed \code{anchor_gap} and \code{anchor_min_overlap}.}
 
 \item{write_output}{Logical. If \code{TRUE} (default), write the Excel workbook to \code{out_dir}. If \code{FALSE}, return results without creating directories or files.}
 
@@ -147,7 +154,7 @@ If \code{write_output = TRUE}, also writes a multi-sheet Excel workbook to \code
 \description{
 A function for loop annotation and target mapping, designed to integrate 1D genomic features with 3D chromatin architecture.
 \enumerate{
-\item \strong{Loop Annotation:} Classifies 3D spatial interactions (e.g., distal-to-promoter, promoter-to-promoter) using positional anchor labels relative to gene annotations. \strong{Important:} anchor type \code{"E"} denotes a \emph{positional} distal/intergenic classification — it does \strong{not} imply functional enhancer activity. Orthogonal chromatin data are required for functional interpretation.
+\item \strong{Loop Annotation:} Classifies 3D spatial interactions (e.g., distal-to-promoter, promoter-to-promoter) using positional anchor labels relative to gene annotations. \strong{Important:} anchor type \code{"E"} denotes a \emph{positional} distal/intergenic classification -- it does \strong{not} imply functional enhancer activity. Orthogonal chromatin data are required for functional interpretation.
 \item \strong{Feature-to-Target Mapping:} Links 1D genomic features (e.g., GWAS risk SNPs, ATAC-seq peaks, ChIP-seq binding sites) to putative target genes via 3D chromatin contacts, providing a loop-based alternative to linear proximity-based assignments.
 }
 }
@@ -167,7 +174,7 @@ To address complex loci where a single anchor overlaps multiple promoters (e.g.,
 \enumerate{
 \item \emph{Biotype Prioritization:} Selects the highest-priority candidates by functional class: \code{Protein Coding > small-ncRNA (miRNA, snoRNA, snRNA, rRNA, scaRNA) > Antisense > lncRNA/ncRNA > Pseudogene}.
 \item \emph{Expression Filter:} Within the selected biotype tier, excludes transcriptionally silent genes using a user-provided expression matrix. If no gene in the tier is expressed, all candidates in that tier are retained.
-\item \emph{Expression Tiebreaker:} Among remaining candidates of equal biotype priority, retains all genes whose expression is within one order of magnitude of the highest-expressing candidate (i.e., expression >= 10\\% of the group maximum; in log2 space this corresponds to ~3.3-fold below the maximum). This co-dominant rule preserves functionally redundant candidates such as bidirectional promoter pairs, where co-expressed partners typically fall within 2-3 fold of each other. The 10\\% threshold is not user-tunable; it reflects the conventional definition of co-expression within one order of magnitude.
+\item \emph{Expression Tiebreaker:} Among remaining candidates of equal biotype priority, retains all genes whose expression >= \code{co_dominance_ratio} x the group maximum. Default \code{0.1} (one order of magnitude; ~3.3-fold in log2 space). This co-dominant rule preserves functionally redundant candidates such as bidirectional promoter pairs, where co-expressed partners typically fall within 2-3 fold of each other. Edge case: when all candidates in the best biotype tier have TPM = 0, all are retained (the tiebreaker cannot distinguish them), which may produce multi-gene assignments at transcriptionally silent loci.
 }
 
 \strong{Network Topology Analysis}
@@ -185,7 +192,7 @@ filters:
 \item \code{anchor_min_overlap} -- requires a minimum physical overlap in bp.
 \item \code{anchor_min_frac} -- requires the overlap to cover a minimum fraction of the peak.
 }
-The table below summarises recommended settings for common experimental designs.
+The table below lists suggested starting points for common experimental designs.
 
 \tabular{llll}{
 \strong{Experimental design} \tab \code{anchor_gap} \tab \code{anchor_min_overlap} \tab \code{anchor_min_frac} \cr

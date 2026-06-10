@@ -346,8 +346,8 @@ test_that(".sample_gc_matched_background guards: empty background", {
 # Additional coverage tests
 # ════════════════════════════════════════════════════════════════════════════
 
-test_that("run_gsea_analysis with gsea_ntop limiting", {
-  # Test the gsea_ntop branch (lines 406-414)
+test_that("run_gsea_analysis with gsea_nSample limiting", {
+  # Test the gsea_nSample branch (lines 406-414)
   gl <- setNames(
     c(5, 4, 3, 2, 1, 0, -1, -2, -3, -4),
     c("A", "B", "C", "D", "E", "F", "G", "H", "I", "J")
@@ -355,18 +355,18 @@ test_that("run_gsea_analysis with gsea_ntop limiting", {
   tg <- c("A", "B", "C", "D", "E", "F", "G", "H")
 
   set.seed(42)
-  out <- looplook:::run_gsea_analysis(tg, gl, gsea_ntop = 4, "Test_ntop")
+  out <- looplook:::run_gsea_analysis(tg, gl, gsea_nSample = 4, "Test_ntop")
   expect_type(out, "list")
   expect_true("result" %in% names(out))
 })
 
-test_that("run_gsea_analysis with valid <= gsea_ntop", {
-  # When valid genes <= gsea_ntop, should use all valid genes (line 413)
+test_that("run_gsea_analysis with valid <= gsea_nSample", {
+  # When valid genes <= gsea_nSample, should use all valid genes (line 413)
   gl <- setNames(c(5, 4, 3), c("A", "B", "C"))
   tg <- c("A", "B", "C")
 
   set.seed(42)
-  out <- looplook:::run_gsea_analysis(tg, gl, gsea_ntop = 10, "Test_all")
+  out <- looplook:::run_gsea_analysis(tg, gl, gsea_nSample = 10, "Test_all")
   expect_type(out, "list")
 })
 
@@ -376,7 +376,7 @@ test_that("run_gsea_analysis with all-zero weights", {
   tg <- LETTERS[1:8]
 
   set.seed(42)
-  out <- looplook:::run_gsea_analysis(tg, gl, gsea_ntop = 4, "Test_zero_wt")
+  out <- looplook:::run_gsea_analysis(tg, gl, gsea_nSample = 4, "Test_zero_wt")
   expect_type(out, "list")
 })
 

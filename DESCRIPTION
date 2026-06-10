@@ -1,6 +1,8 @@
 Package: looplook
 Title: Integrative Suite for Target Assignment and Functional Annotation of Chromatin Interactions
 Version: 0.99.14
+Author: Ying ZHANG
+Maintainer: Ying ZHANG <12207129@zju.edu.cn>
 Authors@R: c(
     person(given = "Ying", family = "ZHANG", 
            role = c("aut", "cre"), 
@@ -59,8 +61,9 @@ Imports:
     ChIPseeker,
     methods,
     scales,
+    withr,
     clusterProfiler,
-    enrichplot
+    enrichplot,
 Suggests:
     BiocStyle,
     ComplexHeatmap,

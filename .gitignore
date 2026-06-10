@@ -20,4 +20,6 @@ pkgdown/
 tests/testthat/_problems/
 tests/testthat/testthat-problems.rds
 coverage-report.html
+README.html
+vignettes/*.html
 lib/

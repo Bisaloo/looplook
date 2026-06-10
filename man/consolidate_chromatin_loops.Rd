@@ -38,8 +38,8 @@ consolidate_chromatin_loops(
 If \code{NULL} (default), the threshold is automatically calculated:
 \itemize{
 \item For 2-3 replicates: Requires all (100\\%).
-\item For \eqn{N \ge 4}: Requires \eqn{\lfloor 0.75N \rfloor + 1}
-(e.g., 3 for N=4, 4 for N=5, 7 for N=8).
+\item For \eqn{N \ge 4}: Requires \eqn{\ge 75\%} of replicates
+(\code{ceiling(0.75 * n_reps)}; e.g., 3 for N=4, 4 for N=5, 6 for N=8).
 }}
 
 \item{score_col}{Integer or \code{NULL}. Column index to use as interaction
@@ -67,8 +67,10 @@ chaining produces clusters with span exceeding the chaining threshold
 \code{"drop"}: remove clusters exceeding the threshold.
 \code{"error"}: stop with an error.}
 
-\item{blacklist_species}{Character. Species/build for built-in blacklist
-(e.g., "hg38", "hg19", "mm10", "mm9"), or a path to a custom BED file.}
+\item{blacklist_species}{Character. Species/build for built-in ENCODE
+blacklist (\code{"hg38"}, \code{"hg19"}, \code{"mm10"}, \code{"mm9"}),
+or a path to a custom BED file. When a species name is recognised, the
+bundled blacklist is used; otherwise the value is treated as a file path.}
 
 \item{region_of_interest}{Character. Path to BED file defining regions of interest (ROI). Only loops overlapping these regions will be kept.}
 
@@ -93,6 +95,9 @@ A filtered \code{\link[InteractionSet]{GInteractions}} object with metadata colu
 \item{\code{n_reps}}{Number of input files that support this entry.}
 \item{\code{cluster_id}}{Connected-component cluster identifier.}
 }
+The returned object carries a \code{looplook_metadata} attribute (access via
+\code{attr(x, "looplook_metadata")}) with package version, call parameters,
+diagnostics, and database versions.
 When \code{write_output = TRUE} and \code{out_file} is provided, an extended
 BEDPE file is written with the additional columns \code{n_members} and
 \code{n_reps} appended after the standard BEDPE fields.

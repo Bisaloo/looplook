@@ -41,6 +41,7 @@ looplook_report(
   lfc_col = "log2FoldChange",
   metadata_file = NULL,
   precomputed_res = NULL,
+  chromatin_beds = list(),
   output_file = NULL,
   quiet = FALSE,
   seed = NULL,
@@ -122,6 +123,11 @@ looplook_report(
 in-memory list object returned by \code{annotate_peaks_and_loops}.
 When provided, annotation is skipped and refinement starts from this object.}
 
+\item{chromatin_beds}{Named list of BED file paths for orthogonal chromatin
+mark validation (passed to \code{\link{refine_loop_anchors_by_expression}}).
+When non-empty, a \emph{Chromatin Validation} section appears in the report
+with confidence-level distribution for eP/eG anchors. Default: \code{list()} (skip).}
+
 \item{output_file}{Character. Output HTML file name. \code{NULL} derives from \code{project_name}.}
 
 \item{quiet}{Logical. Suppress rendering output. Default \code{FALSE}.}
@@ -136,7 +142,7 @@ The path to the generated HTML report (invisibly).
 }
 \description{
 One-click parameterised R Markdown report that executes the full looplook
-pipeline (annotation → refinement → profiling) and renders an
+pipeline (annotation -> refinement -> profiling) and renders an
 interpretation-ready HTML document suitable for sharing with collaborators.
 }
 \details{
