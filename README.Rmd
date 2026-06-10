@@ -78,9 +78,30 @@ This module serves as the **core target mapping engine**. It resolves locus assi
 * **`tss_region`**: Defines the **spatial boundary of gene promoters** relative to the Transcription Start Site (TSS).
 
 ```{r}
-# Use pre-computed example annotation (or run annotate_peaks_and_loops with example data)
-rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
-load(rdata_path) # loads res_integrated
+# Annotate chromatin loops and map features to target genes via 3D contacts
+# When TxDb/OrgDb are installed, runs the full pipeline; otherwise loads pre-computed result
+if (requireNamespace("TxDb.Hsapiens.UCSC.hg38.knownGene", quietly = TRUE) &&
+    requireNamespace("org.Hs.eg.db", quietly = TRUE)) {
+  bedpe_file <- system.file("extdata", "example_loops_1.bedpe", package = "looplook")
+  atac_path  <- system.file("extdata", "example_peaks.bed",       package = "looplook")
+  expr_path  <- system.file("extdata", "example_tpm.txt",         package = "looplook")
+
+  res_integrated <- annotate_peaks_and_loops(
+    bedpe_file       = bedpe_file,          # Chromatin loops (BEDPE)
+    target_bed       = atac_path,           # Genomic features to map
+    expr_matrix_file = expr_path,           # RNA-seq expression matrix
+    sample_columns   = c("con1", "con2"),   # Samples for baseline expression
+    species          = "hg38",
+    neighbor_hop     = 0,                   # Direct contacts only
+    hub_percentile   = 0.95,                # Top 5% as regulatory hubs
+    out_dir          = out_dir,
+    project_name     = "HiChIP_Integrative"
+  )
+} else {
+  tmp <- new.env()
+  load(system.file("extdata", "analysis_results.RData", package = "looplook"), envir = tmp)
+  res_integrated <- tmp[[ls(tmp)[1]]]
+}
 ```
 
 **Output Data Dictionary: The Comprehensive 3D Spatial Catalog**

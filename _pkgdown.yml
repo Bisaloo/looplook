@@ -103,6 +103,7 @@ reference:
     desc: "Advanced logic for eliminating transcriptionally silent contacts using RNA-seq data."
     contents:
       - refine_loop_anchors_by_expression
+      - validate_epeG_by_chromatin
 
   - title: "Module 4: Automated Functional Profiling"
     desc: "End-to-end integration with JASPAR motifs, GO enrichment, and PPI networks."
