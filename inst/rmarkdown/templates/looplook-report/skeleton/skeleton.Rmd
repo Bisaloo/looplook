@@ -545,7 +545,7 @@ if (!is.null(ta) && nrow(ta) > 0) {
 }
 ```
 
-```{r annotation-target-links}
+```{r annotation-target-links, results='asis'}
 if (!is.null(res$target_gene_links) && nrow(res$target_gene_links) > 0) {
   cat('<div class="table-caption">Target gene evidence links</div>\n')
   render_table(res$target_gene_links, head_n = 50)
@@ -752,10 +752,9 @@ if (!is.null(plot_descriptions[["Target_Sankey"]])) {
 cat(sprintf('<div class="plot-container"><iframe src="target_sankey.html" width="100%%" height="450" frameborder="0" style="border:none;"></iframe></div>\n'))
 ```
 
-# Orthogonal Chromatin Validation {.section-header}
-
 ```{r chromatin-validation, results='asis', eval=has_expr && !is.null(refined) && !is.null(refined$chromatin_validation) && nrow(refined$chromatin_validation) > 0}
 cv <- refined$chromatin_validation
+cat("\n# Orthogonal Chromatin Validation {.section-header}\n\n")
 cv_tab <- table(cv$confidence)
 cv_levels <- c("gold_standard", "high_confidence", "supported", "weak", "uncertain")
 cv_colors <- c("gold_standard"="#1B5E20", "high_confidence"="#2E7D32", "supported"="#66BB6A",

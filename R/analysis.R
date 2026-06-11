@@ -810,6 +810,7 @@ run_ppi_analysis <- function(target_genes, global_glist, org_db, ppi_score, ppi_
             STRINGdb::STRINGdb$new(
                 species = species_id,
                 score_threshold = ppi_score,
+                version = "12.0",
                 input_directory = tempdir()
             )
         ),
