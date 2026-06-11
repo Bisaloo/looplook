@@ -33,7 +33,7 @@ biocViews: Software, Epigenetics, HiC, ChIPSeq, RNASeq,
     GeneExpression, FunctionalGenomics, GenomeAnnotation, 
     SystemsBiology, Visualization, Classification, Clustering, 
     QualityControl, Spatial, Network, Coverage, GeneTarget
-Depends: R (>= 4.5.0)
+Depends: R (>= 4.4.0)
 Imports: 
     dplyr,
     ggplot2,
