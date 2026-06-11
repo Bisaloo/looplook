@@ -1003,7 +1003,7 @@ dt_to_gi <- function(dt) {
     q75_w <- stats::quantile(all_widths, 0.75, na.rm = TRUE, names = FALSE)
 
     # Consecutive anchor spacing (distance to previous anchor after sorting).
-    # This is NOT a true nearest-neighbour distance — it only measures gaps
+    # This is NOT a true nearest-neighbour distance -- it only measures gaps
     # between consecutive anchors on the same chromosome.  Adequate for
     # diagnostic purposes (estimating typical anchor spacing) but should not
     # be interpreted as a rigorous spatial statistic.
