@@ -539,3 +539,20 @@ test_that(".diagnose_gap detects moderate risk for mid-width anchors", {
   expect_true(any(grepl("RISK MODERATE", msg)) ||
               any(grepl("RISK HIGH", msg)))  # either is fine for coverage
 })
+
+# --- cluster_loops_dt: multi-chromosome split ---
+test_that("cluster_loops_dt handles multi-chromosome data without idx error", {
+  dt <- data.table::data.table(
+    chr1   = c("chr1", "chr2", "chr1"),
+    start1 = c(100L, 100L, 150L),
+    end1   = c(200L, 200L, 250L),
+    chr2   = c("chr1", "chr2", "chr1"),
+    start2 = c(1000L, 1000L, 1050L),
+    end2   = c(2000L, 2000L, 2100L),
+    score  = c(1, 1, 1),
+    source = c(1L, 1L, 1L)
+  )
+  result <- looplook:::cluster_loops_dt(dt, gap = 0L)
+  expect_equal(nrow(result), 3L)
+  expect_equal(length(unique(result$cluster)), 2L)  # chr1-chr1 pairs merge, chr2 stays alone
+})

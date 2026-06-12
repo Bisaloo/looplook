@@ -18,7 +18,8 @@
     for (cc in coord_cols) {
         df[[cc]] <- suppressWarnings(as.numeric(df[[cc]]))
     }
-    if (any(is.na(df[, .SD, .SDcols = coord_cols]))) {
+    coord_mat <- cbind(df[[2]], df[[3]], df[[5]], df[[6]])
+    if (any(is.na(coord_mat))) {
         stop("BEDPE file contains non-numeric coordinate columns.", call. = FALSE)
     }
     if (any(df[[2]] >= df[[3]], na.rm = TRUE) || any(df[[5]] >= df[[6]], na.rm = TRUE)) {
@@ -345,7 +346,7 @@ read_simple_bed <- function(bed_file, quiet = FALSE) {
 #' transitively chain loci (A-B and B-C merge, pulling A and C into the same
 #' cluster even if they are far apart). By default, a warning is emitted when
 #' any cluster span exceeds the chaining threshold
-#' (\code{max(3xgap, 5xmedian_anchor_width)}). Use \code{chaining_policy} to
+#' (\code{max(3*gap, 5*med_width*gap/1000)}). Use \code{chaining_policy} to
 #' control this behavior (\code{"warn"}, \code{"none"}, \code{"drop"}, or
 #' \code{"error"}).
 #'
@@ -388,7 +389,7 @@ read_simple_bed <- function(bed_file, quiet = FALSE) {
 #'   If \code{NULL} (default), auto-detection is used (see \code{\link{bedpe_to_gi}}).
 #' @param chaining_policy Character. Controls behaviour when connected-component
 #'   chaining produces clusters with span exceeding the chaining threshold
-#'   (\code{max(3xgap, 5xmedian_anchor_width)}).
+#'   (\code{max(3*gap, 5*med_width*gap/1000)}).
 #'   \code{"warn"} (default): emit a warning and retain all clusters.
 #'   \code{"none"}: silently accept all clusters.
 #'   \code{"drop"}: remove clusters exceeding the threshold.
@@ -723,7 +724,7 @@ consolidate_chromatin_loops <- function(
         span1 <- GenomicRanges::end(a1) - GenomicRanges::start(a1) + 1L
         span2 <- GenomicRanges::end(a2) - GenomicRanges::start(a2) + 1L
         span_threshold <- if (!is.null(med_width) && is.finite(med_width) && med_width > 0) {
-            max(3 * gap, 5 * med_width)
+            max(3 * gap, 5 * med_width * gap / 1000)
         } else {
             3 * gap
         }
@@ -1002,24 +1003,15 @@ dt_to_gi <- function(dt) {
     q25_w <- stats::quantile(all_widths, 0.25, na.rm = TRUE, names = FALSE)
     q75_w <- stats::quantile(all_widths, 0.75, na.rm = TRUE, names = FALSE)
 
-    # Consecutive anchor spacing (distance to previous anchor after sorting).
-    # This is NOT a true nearest-neighbour distance -- it only measures gaps
-    # between consecutive anchors on the same chromosome.  Adequate for
-    # diagnostic purposes (estimating typical anchor spacing) but should not
-    # be interpreted as a rigorous spatial statistic.
-    .nearest_dist <- function(chr_vec, start_vec, end_vec) {
-        ord <- order(chr_vec, start_vec)
-        s_chr <- chr_vec[ord]
-        s_start <- start_vec[ord]
-        s_end <- end_vec[ord]
-        same_chr <- s_chr[-1] == s_chr[-length(s_chr)]
-        if (!any(same_chr)) return(numeric(0))
-        # Distance from end of previous to start of next (negative = overlapping)
-        gaps_bp <- s_start[-1][same_chr] - s_end[-length(s_end)][same_chr]
-        gaps_bp
+    # True nearest-neighbour distance via distanceToNearest (per-chromosome).
+    .true_nearest_dist <- function(chr_vec, start_vec, end_vec) {
+        gr <- GenomicRanges::GRanges(chr_vec, IRanges::IRanges(start_vec, end_vec))
+        hits <- GenomicRanges::distanceToNearest(gr)
+        if (length(hits) == 0) return(numeric(0))
+        S4Vectors::mcols(hits)$distance
     }
-    dist1 <- .nearest_dist(dt$chr1, dt$start1, dt$end1)
-    dist2 <- .nearest_dist(dt$chr2, dt$start2, dt$end2)
+    dist1 <- .true_nearest_dist(dt$chr1, dt$start1, dt$end1)
+    dist2 <- .true_nearest_dist(dt$chr2, dt$start2, dt$end2)
     all_dists <- c(dist1, dist2)
 
     med_dist <- if (length(all_dists) > 0) stats::median(all_dists, na.rm = TRUE) else NA_real_
@@ -1050,6 +1042,7 @@ dt_to_gi <- function(dt) {
     ))
 
     # Risk assessment
+    # Use data-type-aware thresholds for better biological relevance
     if (effective_ratio > 5 && gap > 500 && med_w < 500) {
         log_message(sprintf(
             "  [!!] RISK HIGH: gap=%s bp inflates narrow anchors (median %s bp) by %.0fx.",
@@ -1077,6 +1070,18 @@ dt_to_gi <- function(dt) {
             format(round(med_w * 0.5), big.mark = ","),
             format(round(med_w * 2), big.mark = ",")
         ))
+    } else if (effective_ratio > 2.5 && gap > med_w * 0.5) {
+        # Additional check for broad enhancer data where gap exceeds half the anchor width
+        log_message(sprintf(
+            "  [!]  RISK MODERATE: gap=%s bp is %.1fx the median anchor width (%s bp).",
+            format(gap, big.mark = ","), gap / med_w, format(med_w, big.mark = ",")
+        ))
+        log_message("  For broad regulatory domains, consider whether this gap merges independent elements.")
+        log_message(sprintf(
+            "  If your data contains dense regulatory regions, consider reducing gap to %s-%s bp.",
+            format(round(med_w * 0.3), big.mark = ","),
+            format(round(med_w * 0.5), big.mark = ",")
+        ))
     } else {
         log_message("  Gap appears appropriate for the anchor width distribution.")
     }
@@ -1094,12 +1099,21 @@ dt_to_gi <- function(dt) {
     }
 
     # Data type inference (based on loop anchor width, not peak width)
-    if (med_w < 500) {
-        log_message("  [i]  Narrow loop anchors detected -- typical of TF HiChIP (CTCF/SMC1), ChIA-PET, or restriction-fragment-level resolution.")
+    if (med_w < 300) {
+        log_message("  [i]  TF-binding resolution (CTCF, Pol II HiChIP / ChIA-PET).")
+        dt_label <- "TF_binding"
+    } else if (med_w < 1000) {
+        log_message("  [i]  Narrow enhancer anchors -- typical of ATAC-seq HiChIP or focal histone marks.")
+        dt_label <- "narrow_enhancer"
     } else if (med_w < 3000) {
-        log_message("  [i]  Moderately broad loop anchors -- typical of histone-mark HiChIP (H3K27ac, H3K4me3) or PLAC-seq.")
-    } else if (med_w >= 5000) {
-        log_message("  [i]  Wide loop anchors -- typical of Hi-C bins, Capture Hi-C baits, or super-enhancer-anchored loops.")
+        log_message("  [i]  Broad enhancer anchors -- typical of H3K27ac / H3K4me3 HiChIP or PLAC-seq.")
+        dt_label <- "broad_enhancer"
+    } else if (med_w < 10000) {
+        log_message("  [i]  Super-enhancer-like anchors -- very broad regulatory domains.")
+        dt_label <- "super_enhancer"
+    } else {
+        log_message("  [i]  Hi-C bin / Capture Hi-C bait-level resolution.")
+        dt_label <- "HiC_bin"
     }
     log_message("--- End Gap Diagnosis ---")
 
@@ -1109,7 +1123,7 @@ dt_to_gi <- function(dt) {
         adjacent_gap_median = med_dist,
         adjacent_gap_near_fraction = near_fraction,
         effective_width_ratio = effective_ratio,
-        data_type = if (med_w < 500) "narrow_peak" else if (med_w < 3000) "broad_peak" else "wide_domain"
+        data_type = dt_label
     ))
 }
 
@@ -1126,7 +1140,7 @@ dt_to_gi <- function(dt) {
 #' @param log_message Function. Message output function.
 #' @param med_width Numeric or NULL. Median anchor width from pre-clustering
 #'   diagnosis. When provided, the chaining threshold is
-#'   \code{max(3*gap, 5*med_width)} instead of \code{3*gap} alone, preventing
+#'   \code{max(3*gap, 5*med_width*gap/1000)} instead of \code{3*gap} alone, preventing
 #'   false alarms when gap is small relative to anchor width.
 #' @param n_input_loops Integer or NULL. Total number of input loops before
 #'   consensus filtering. When provided, the consensus retention rate is
@@ -1183,12 +1197,12 @@ dt_to_gi <- function(dt) {
 
     # --- Chaining threshold: combine gap-based and anchor-width-based ---
     chain_threshold <- if (!is.null(med_width) && is.finite(med_width) && med_width > 0) {
-        max(3 * gap, 5 * med_width)
+        max(3 * gap, 5 * med_width * gap / 1000)
     } else {
         3 * gap
     }
-    threshold_src <- if (!is.null(med_width) && is.finite(med_width) && 5 * med_width > 3 * gap) {
-        sprintf("5xmed_width(%s)", format(med_width, big.mark = ","))
+    threshold_src <- if (!is.null(med_width) && is.finite(med_width) && 5 * med_width * gap / 1000 > 3 * gap) {
+        sprintf("5xmed_width(%s) x gap/1000", format(med_width, big.mark = ","))
     } else {
         sprintf("3xgap(%s)", format(gap, big.mark = ","))
     }
@@ -1202,12 +1216,14 @@ dt_to_gi <- function(dt) {
     ))
 
     # --- Top spans: show actual values of largest clusters ---
-    n_above <- sum(max_span > chain_threshold)
+    # n_members = 2 usually means the same loop detected in two replicates
+    # -- not pathological chaining.  Only flag clusters with n_members > 2.
+    n_above <- sum(max_span > chain_threshold & nm > 2)
     n_show <- min(max(n_above, 3L), 5L)
     top_idx <- head(order(max_span, decreasing = TRUE), n_show)
     log_message("  Largest cluster spans:")
     for (i in top_idx) {
-        flag <- if (max_span[i] > chain_threshold) " [!]" else ""
+        flag <- if (max_span[i] > chain_threshold && nm[i] > 2) " [!]" else ""
         log_message(sprintf(
             "    #%s: max_span = %s bp, n_members = %.0f, n_reps = %.0f%s",
             i, format(max_span[i], big.mark = ","),
@@ -1266,6 +1282,9 @@ dt_to_gi <- function(dt) {
 .cluster_loops_inner <- function(dt, gap) {
     n_loops <- nrow(dt)
     if (n_loops == 0) return(dt)
+    # Remap idx to local range (1..n_loops) so igraph vertex IDs stay in bounds.
+    # The original idx values are from the global table before chr-pair splitting.
+    dt[, idx := seq_len(n_loops)]
 
     hits <- dt[dt, on = .(
         chr1 = chr1,

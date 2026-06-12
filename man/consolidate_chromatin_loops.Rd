@@ -61,7 +61,7 @@ If \code{NULL} (default), auto-detection is used (see \code{\link{bedpe_to_gi}})
 
 \item{chaining_policy}{Character. Controls behaviour when connected-component
 chaining produces clusters with span exceeding the chaining threshold
-(\code{max(3xgap, 5xmedian_anchor_width)}).
+(\code{max(3*gap, 5*med_width*gap/1000)}).
 \code{"warn"} (default): emit a warning and retain all clusters.
 \code{"none"}: silently accept all clusters.
 \code{"drop"}: remove clusters exceeding the threshold.
@@ -120,7 +120,7 @@ The function supports three modes:
 transitively chain loci (A-B and B-C merge, pulling A and C into the same
 cluster even if they are far apart). By default, a warning is emitted when
 any cluster span exceeds the chaining threshold
-(\code{max(3xgap, 5xmedian_anchor_width)}). Use \code{chaining_policy} to
+(\code{max(3*gap, 5*med_width*gap/1000)}). Use \code{chaining_policy} to
 control this behavior (\code{"warn"}, \code{"none"}, \code{"drop"}, or
 \code{"error"}).
 

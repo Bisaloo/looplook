@@ -63,12 +63,11 @@
 #'     \item{\code{warnings}}{Character vector of module-level warnings (e.g., "[GO] failed: ..."). Empty if all modules succeeded.}
 #'   }
 #'
-#' @note If any downstream analysis module fails (e.g. due to missing optional
-#'   packages or network timeouts), the error propagates and stops the entire
-#'   function. To obtain partial results when some modules are unavailable,
-#'   disable problematic steps via \code{run_go = FALSE}, \code{run_ppi = FALSE},
-#'   or \code{run_motif = FALSE}, or call the corresponding internal functions
-#'   individually.
+#' @note Downstream modules are run in a fail-soft mode. Module-level failures
+#'   (e.g. due to missing optional packages or network timeouts) are captured as
+#'   warnings and stored in the returned \code{warnings} element, allowing other
+#'   modules to complete. To proactively disable specific modules, set
+#'   \code{run_go = FALSE}, \code{run_ppi = FALSE}, or \code{run_motif = FALSE}.
 #'
 #' @examples
 #' rdata_path <- system.file("extdata", "analysis_results.RData", package = "looplook")
