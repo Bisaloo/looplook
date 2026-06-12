@@ -903,7 +903,7 @@ annotate_peaks_and_loops <- function(
     loops_annotated$single_loop_genes <- locus_genes
     loops_annotated$reg_loop_genes <- locus_genes
 
-    log_message("    Calculating Topology (Hops)...")
+    log_message("    Calculating Topology (Hops, neighbor_hop = ", neighbor_hop, ")...")
     map_info$SYMBOL <- trimws(map_info$SYMBOL)
     valid_pg_nodes <- map_info %>%
         dplyr::filter(type_code %in% c("P", "G") & !is.na(SYMBOL) & SYMBOL != "")
