@@ -172,8 +172,9 @@ if (!requireNamespace("kableExtra", quietly = TRUE)) {
 # Installation
 
 ```{r install, eval=FALSE}
-# From Bioconductor
-BiocManager::install("looplook")
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("zying106/looplook")
 ```
 
 ```{r load_package}
